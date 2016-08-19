@@ -1,66 +1,14 @@
 """Generic interface for initial value problem solvers."""
 from __future__ import division, print_function, absolute_import
 
-from warnings import warn
 import numpy as np
-from scipy.optimize._numdiff import approx_derivative
-from .common import EPS, ODEResult
-from .rk import rk
-from .radau import radau
+
+from .common import get_active_events, handle_events, prepare_events
+from .solver import SolverStatus, SolverDirection, IntegrationException
+from .rk import RungaKutta45
 
 
-METHODS = ['RK23', 'RK45', 'Radau']
-
-
-TERMINATION_MESSAGES = {
-    -1: "Required step size became too small.",
-    0: "The solver successfully reached the interval end.",
-    1: "A termination event occurred."
-}
-
-
-def validate_tol(rtol, atol, n):
-    """Validate tolerance values."""
-    if rtol < 100 * EPS:
-        warn("`rtol` is too low, setting to {}".format(100 * EPS))
-        rtol = 100 * EPS
-
-    atol = np.asarray(atol)
-    if atol.ndim > 0 and atol.shape != (n,):
-        raise ValueError("`atol` has wrong shape.")
-
-    if np.any(atol < 0):
-        raise ValueError("`atol` must be positive.")
-
-    return rtol, atol
-
-
-def prepare_events(events):
-    if callable(events):
-        events = (events,)
-
-    if events is not None:
-        is_terminal = np.empty(len(events), dtype=bool)
-        direction = np.empty(len(events))
-        for i, event in enumerate(events):
-            try:
-                is_terminal[i] = event.terminate
-            except AttributeError:
-                is_terminal[i] = False
-
-            try:
-                direction[i] = event.direction
-            except AttributeError:
-                direction[i] = 0
-    else:
-        is_terminal = None
-        direction = None
-
-    return events, is_terminal, direction
-
-
-def solve_ivp(fun, x_span, ya, rtol=1e-3, atol=1e-6, method='RK45', M=None,
-              max_step=None, jac=None, events=None):
+def ivp_solution(t0, tF, y0, fun, *, method=RungaKutta45, events=None, **options):
     """Solve an initial value problem for a system of ODEs.
 
     This function numerically integrates a system of ODEs given an initial
@@ -189,64 +137,79 @@ def solve_ivp(fun, x_span, ya, rtol=1e-3, atol=1e-6, method='RK45', M=None,
     .. [5] `Stiff equation <https://en.wikipedia.org/wiki/Stiff_equation>`_ on
            Wikipedia.
     """
-    if method not in METHODS:
-        raise ValueError("`method` must be one of {}.".format(METHODS))
 
-    a, b = float(x_span[0]), float(x_span[1])
-    if a == b:
-        raise ValueError("Initial and final `x` must be distinct.")
-
-    ya = np.atleast_1d(ya)
-    if ya.ndim != 1:
-        raise ValueError("`ya` must be 1-dimensional.")
-    n = ya.shape[0]
-
-    def fun_wrapped(x, y):
-        return np.asarray(fun(x, y), dtype=float)
-
-    fa = fun_wrapped(a, ya)
-    if fa.shape != ya.shape:
-        raise ValueError("`fun` return is expected to have shape {}, "
-                         "but actually has {}.".format(ya.shape, fa.shape))
-
-    if method in ['RK23', 'RK45']:
-        if M is not None:
-            raise ValueError("`M` is supported only by 'Radau' method.")
-    elif method == 'Radau':
-        if jac is None:
-            def jac_wrapped(x, y):
-                return approx_derivative(lambda z: fun(x, z),
-                                         y, method='2-point')
-            Ja = jac_wrapped(a, ya)
-        elif callable(jac):
-            def jac_wrapped(x, y):
-                return np.asarray(jac(x, y), dtype=float)
-            Ja = jac_wrapped(a, ya)
-            if Ja.shape != (n, n):
-                raise ValueError("`jac` return is expected to have shape {}, "
-                                 "but actually has {}."
-                                 .format((n, n), Ja.shape))
-        else:
-            Ja = np.asarray(jac, dtype=float)
-            if Ja.shape != (n, n):
-                raise ValueError("`jac` is expected to have shape {}, but "
-                                 "actually has {}.".format((n, n), Ja.shape))
-            jac_wrapped = None
-
+    solver = method(t0, y0, fun, t_final=tF, **options)
     events, is_terminal, direction = prepare_events(events)
 
-    if max_step is None:
-        max_step = 0.1 * np.abs(b - a)
+    n = solver.n
+    x = solver.t
+    y = solver.y
 
-    if method in ['RK23', 'RK45']:
-        status, sol, xs, ys, fs, x_events = rk(
-            fun_wrapped, a, b, ya, fa, rtol, atol, max_step, method,
-            events, is_terminal, direction)
-    elif method == 'Radau':
-        status, sol, xs, ys, fs, x_events = radau(
-            fun, jac_wrapped, a, b, ya, fa, Ja, rtol, atol, max_step,
-            events, is_terminal, direction)
+    if events is not None:
+        g = [event(x, y) for event in events]
+        x_events = [[] for _ in range(len(events))]
+    else:
+        x_events = None
 
-    return ODEResult(sol=sol, x=xs, y=ys, yp=fs, x_events=x_events,
-                     status=status, message=TERMINATION_MESSAGES[status],
-                     success=status >= 0)
+    states = [solver.state]
+
+    while solver.status == SolverStatus.running or solver.status == SolverStatus.started:
+        solver.step()
+
+        if solver.status == SolverStatus.failed:
+            sol = OdeSolution(t0, solver.t, n, solver.spline(states))
+            raise IntegrationException("Step size has fallen below floating point precision", solver.t, sol)
+
+        x_new = solver.t
+        y_new = solver.y
+        states.append(solver.state)
+
+        if events is not None:
+            g_new = [event(x_new, y_new) for event in events]
+            active_events = get_active_events(g, g_new, direction)
+            g = g_new
+            if active_events.size > 0:
+                sol = solver.spline(states[-2:])
+                root_indices, roots, terminate = handle_events(
+                    sol, events, active_events, is_terminal, x, x_new)
+
+                for e, xe in zip(root_indices, roots):
+                    x_events[e].append(xe)
+
+                if terminate:
+                    tF = roots[-1]
+                    break
+
+        x = x_new
+        y = y_new
+
+    return OdeSolution(t0, tF, n, solver.spline(states), x_events)
+
+
+class OdeSolution:
+    def __init__(self, t0, tF, n, spline, t_events):
+        self.n = n
+        if t0 <= tF:
+            self.s = SolverDirection.forward
+        else:
+            self.s = SolverDirection.reverse
+        self.t0 = t0
+        self.tF = tF
+        self.spline = spline
+        self.t_events = t_events
+
+    def __call__(self, t, iy=Ellipsis):
+        def check_time(ti):
+            if self.s == SolverDirection.forward and (ti < self.t0 or ti > self.tF) or \
+                    self.s == SolverDirection.reverse and (ti > self.t0 or ti < self.tF):
+                raise ValueError("Requested time {} is outside the solution interval [{}, {}]"
+                                 .format(ti, self.t0, self.tF))
+
+        if np.isscalar(t):
+            check_time(t)
+        else:
+            for item in t:
+                check_time(item)
+
+        result = self.spline(t).T  # len(t) rows and
+        return result[..., iy]

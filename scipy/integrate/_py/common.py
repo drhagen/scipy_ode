@@ -8,10 +8,6 @@ from scipy.optimize import brentq, OptimizeResult
 EPS = np.finfo(float).eps
 
 
-class ODEResult(OptimizeResult):
-    pass
-
-
 def norm(x):
     """Compute RMS norm."""
     return np.linalg.norm(x) / x.size ** 0.5
@@ -171,3 +167,67 @@ def solve_event_equation(event, sol, x, x_new):
         Found solution.
     """
     return brentq(lambda t: event(t, sol(t)), x, x_new, xtol=4 * EPS)
+
+
+def prepare_events(events):
+    if callable(events):
+        events = (events,)
+
+    if events is not None:
+        is_terminal = np.empty(len(events), dtype=bool)
+        direction = np.empty(len(events))
+        for i, event in enumerate(events):
+            try:
+                is_terminal[i] = event.terminate
+            except AttributeError:
+                is_terminal[i] = False
+
+            try:
+                direction[i] = event.direction
+            except AttributeError:
+                direction[i] = 0
+    else:
+        is_terminal = None
+        direction = None
+
+    return events, is_terminal, direction
+
+
+class PointSpline:
+    # scipy interpolators don't interpolate single points
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __call__(self, x):
+        def check_x(xi):
+            if xi < self.x or xi > self.x:
+                raise ValueError("Value {} is outside the solution interval [{}, {}]"
+                                 .format(xi, self.x, self.x))
+
+        if np.isscalar(x):
+            check_x(x)
+            return self.y
+        else:
+            for item in x:
+                check_x(item)
+            return np.tile(self.y, (len(x), 1)).T
+
+
+def validate_rtol(rtol):
+    if rtol <= 0:
+        raise ValueError("`rtol` must be positive.")
+
+    return rtol
+
+
+def validate_atol(atol, n):
+    atol = np.asarray(atol)
+
+    if atol.ndim > 0 and atol.shape != (n,):
+        raise ValueError("`atol` has wrong shape.")
+
+    if np.any(atol < 0):
+        raise ValueError("`atol` must be positive.")
+
+    return atol

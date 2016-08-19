@@ -1,10 +1,11 @@
-"""Fifth order implicit Runge-Kutta method of Radau family."""
 from __future__ import division, print_function, absolute_import
 
 import numpy as np
 from scipy.linalg import lu_factor, lu_solve
-from .common import (EPS, norm, get_active_events, handle_events,
-                     select_initial_step)
+from scipy.optimize._numdiff import approx_derivative
+
+from .solver import OdeSolver, SolverStatus
+from .common import select_initial_step, norm, EPS, PointSpline, validate_rtol, validate_atol
 
 S6 = 6 ** 0.5
 
@@ -37,108 +38,239 @@ MAX_FACTOR = 8  # Maximum allowed increase in a step size.
 MIN_FACTOR = 0.2  # Minimum allowed decrease in a step size.
 
 
-def create_spline(x, y, Z):
-    """Create a cubic spline given values at 4 points on each interval.
+class Radau(OdeSolver):
+    class OdeState(OdeSolver.OdeState):
+        def __init__(self, t, y, Z=None):
+            super().__init__(t, y)
+            self.Z = Z
 
-    Parameters
-    ----------
-    x : ndarray, shape (n_points,)
-        Values of the independent variable.
-    y : ndarray, shape (n_points, n)
-        Values of the dependent variable at `x`.
-    Z : ndarray, shape (n_points - 1, 3, n)
-        Values to add to `y` to compute the solution at 3 other points on
-        each interval (see `C` constant vector at the beginning of this file).
+    def __init__(self, t0, y0, fun, jac=None, *, t_final=np.inf, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6):
+        t0, t_final, y0, fun = self.check_arguments(t0, t_final, y0, fun)
 
-    Returns
-    -------
-    sol : PPoly
-        Constructed spline as a PPoly instance.
-    """
-    from scipy.interpolate import PPoly
+        state = self.OdeState(t0, y0)
+        super().__init__(state, fun, t_final)
 
-    if x[-1] < x[0]:
-        reverse = True
-        x = x[::-1]
-        y = y[::-1]
-        Z = Z[::-1]
+        if jac is None:
+            def jac_wrapped(t, y):
+                return approx_derivative(lambda z: fun(t, z),
+                                         y, method='2-point')
 
-        z0 = Z[:, 1] - Z[:, 2]
-        z1 = Z[:, 0] - Z[:, 2]
-        z2 = -Z[:, 2]
-    else:
-        reverse = False
-        z0 = Z[:, 0]
-        z1 = Z[:, 1]
-        z2 = Z[:, 2]
+            self.jac = jac_wrapped
+            self.J = jac_wrapped(self.t, self.y)
+        elif callable(jac):
+            def jac_wrapped(t, y):
+                return np.asarray(jac(t,y), dtype=float)
 
-    h = np.diff(x)[:, None]
-    n_points, n = y.shape
-    c = np.empty((4, n_points - 1, n))
+            self.jac = jac_wrapped
+            self.J = jac_wrapped(self.t, self.y)
+            if self.J.shape != (self.n, self.n):
+                raise ValueError("`jac` return is expected to have shape {}, "
+                                 "but actually has {}."
+                                 .format((self.n, self.n), self.J.shape))
+        else:
+            self.jac = None
+            self.J = np.asarray(jac, dtype=float)
 
-    if reverse:
-        c[0] = ((-10 + 15*S6) * z0 - (10 + 15*S6) * z1 + 30 * z2) / (3 * h**3)
-        c[1] = ((7 - 23*S6) * z0 + (7 + 23*S6) * z1 - 36 * z2) / (3 * h**2)
-        c[2] = ((1 + 8*S6/3) * z0 + (1 - 8*S6/3) * z1 + 3 * z2) / h
-    else:
-        c[0] = ((10 + 15*S6) * z0 + (10 - 15*S6) * z1 + 10 * z2) / (3 * h**3)
-        c[1] = -((23 + 22*S6) * z0 + (23 - 22*S6) * z1 + 8 * z2) / (3 * h**2)
-        c[2] = ((13 + 7*S6) * z0 + (13 - 7*S6) * z1 + z2) / (3 * h)
-    c[3] = y[:-1]
+        self.current_jac = True
 
-    c = np.rollaxis(c, 2)
-    return PPoly(c, x, extrapolate=True, axis=1)
+        self.max_step = max_step
+        self.rtol = validate_rtol(rtol)
+        self.atol = validate_atol(atol, self.n)
+        self.newton_tol = max(10 * EPS / rtol, min(0.03, rtol ** 0.5))
 
+        if step_size is None:
+            step_size = select_initial_step(self.fun, self.t, t_final, self.y, self.f, 5, rtol, atol)
+        self.step_size = min(step_size, max_step)
 
-def create_spline_one_step(x, x_new, y, Z):
-    """Create a cubic spline for a single step.
+        self.LU_real = None
+        self.LU_complex = None
 
-    Parameters
-    ----------
-    x, x_new : float
-        Previous and new values of the independed variable.
-    y : ndarray, shape (n,)
-        Previous value of the dependent variable.
-    Z : ndarray, shape (3, n)
-        Values to add to `y` to compute the solution at 3 other points on
-        the interval (see `C` constant vector at the beginning of this file).
+        self.sol = None
 
-    Returns
-    -------
-    sol : PPoly
-        Constructed spline as a PPoly instance.
-    """
+        self.h_abs_old = None
+        self.error_norm_old = None
 
-    from scipy.interpolate import PPoly
+    @property
+    def f(self):
+        return self.fun(self.t, self.y)
 
-    if x_new < x:
-        reverse = True
-        x, x_new = x_new, x
-        y = y + Z[2]
-        z0 = Z[1] - Z[2]
-        z1 = Z[0] - Z[2]
-        z2 = -Z[2]
-    else:
-        reverse = False
-        z0 = Z[0]
-        z1 = Z[1]
-        z2 = Z[2]
+    def step(self):
+        x = self.t
+        y = self.y
+        f = self.f
+        J = self.J
+        current_jac = self.current_jac  # Jacobian was calculated at current time
 
-    h = x_new - x
-    n = y.shape[0]
-    c = np.empty((4, 1, n))
+        fun = self.fun
+        jac = self.jac
+        s = self.direction
+        b = self.t_final
 
-    if reverse:
-        c[0] = ((-10 + 15*S6) * z0 - (10 + 15*S6) * z1 + 30 * z2) / (3 * h**3)
-        c[1] = ((7 - 23*S6) * z0 + (7 + 23*S6) * z1 - 36 * z2) / (3 * h**2)
-        c[2] = ((1 + 8*S6/3) * z0 + (1 - 8*S6/3) * z1 + 3 * z2) / h
-    else:
-        c[0] = ((10 + 15*S6) * z0 + (10 - 15*S6) * z1 + 10 * z2) / (3 * h**3)
-        c[1] = -((23 + 22*S6) * z0 + (23 - 22*S6) * z1 + 8 * z2) / (3 * h**2)
-        c[2] = ((13 + 7*S6) * z0 + (13 - 7*S6) * z1 + z2) / (3 * h)
-    c[3] = y
+        atol = self.atol
+        rtol = self.rtol
+        newton_tol = self.newton_tol
 
-    return PPoly(c, [x, x_new], extrapolate=True)
+        max_step = self.max_step
+        h_abs = self.step_size
+        h_abs_old = self.h_abs_old  # The size of the previous successful step
+        error_norm_old = self.error_norm_old
+
+        LU_real = self.LU_real
+        LU_complex = self.LU_complex
+
+        sol = self.sol  # The extrapolatable solution from the previous step
+
+        if self.status == SolverStatus.started:
+            rejected = True
+        else:
+            rejected = False
+
+        d = abs(b - x)
+
+        while True:
+            if h_abs > d:
+                h_abs = d
+                x_new = b
+                h = h_abs * s
+                h_abs_old = None
+                error_norm_old = None
+            else:
+                h = h_abs * s
+                x_new = x + h
+
+            if sol is None:
+                Z0 = np.zeros((3, y.shape[0]))
+            else:
+                Z0 = sol(x + h * C).T - y
+
+            scale = atol + np.abs(y) * rtol
+            newton_status, n_iter, Z, f_new, theta, LU_real, LU_complex = \
+                solve_collocation_system(fun, x, y, h, J, Z0, scale,
+                                         newton_tol, LU_real, LU_complex)
+
+            if newton_status == 1:
+                rejected = True
+                if not current_jac:
+                    J = jac(x, y)
+                    h_abs *= 0.75
+                else:
+                    h_abs *= 0.5
+                LU_real = None
+                LU_complex = None
+                continue
+
+            y_new = y + Z[-1]
+
+            ZE = Z.T.dot(E) / h
+            error = lu_solve(LU_real, f + ZE)
+            scale = atol + np.maximum(np.abs(y), np.abs(y_new)) * rtol
+            error_norm = norm(error / scale)
+            safety = 0.9 * (2 * NEWTON_MAXITER + 1) / (2 * NEWTON_MAXITER + n_iter)
+
+            if rejected and error_norm > 1:
+                error = lu_solve(LU_real, fun(x, y + error) + ZE)
+                error_norm = norm(error / scale)
+
+            if error_norm > 1:
+                factor = predict_factor(h_abs, h_abs_old,
+                                        error_norm, error_norm_old)
+                h_abs *= max(MIN_FACTOR, safety * factor)
+
+                rejected = True
+                LU_real = None
+                LU_complex = None
+                continue
+            else:
+                break
+
+        state = self.OdeState(x_new, y_new, Z)
+        self.sol = self.spline([self.state, state])
+        self.state = state
+
+        recompute_jac = jac is not None and n_iter > 1 and theta > 1e-3
+
+        factor = predict_factor(h_abs, h_abs_old, error_norm, error_norm_old)
+        factor = min(MAX_FACTOR, safety * factor)
+
+        if not recompute_jac and factor < 1.2:
+            factor = 1
+        else:
+            LU_real = None
+            LU_complex = None
+
+        if recompute_jac:
+            J = jac(x, y)
+            current_jac = True
+        elif jac is not None:
+            current_jac = False
+        self.J = J
+        self.current_jac = current_jac
+
+        h_abs_old = h_abs
+        h_abs *= factor
+        error_norm_old = error_norm
+
+        if h_abs > max_step:
+            h_abs = max_step
+            h_abs_old = None
+            error_norm_old = None
+
+        self.step_size = h_abs
+        self.h_abs_old = h_abs_old
+        self.error_norm_old = error_norm_old
+
+        self.LU_real = LU_real
+        self.LU_complex = LU_complex
+
+        if x_new == b:
+            self.status = SolverStatus.finished
+        elif x_new == x:  # h less than spacing between numbers.
+            self.status = SolverStatus.failed
+        else:
+            self.status = SolverStatus.running
+
+    def spline(self, states):
+        if len(states) == 1:
+            state = states[0]
+            return PointSpline(state.t, state.y)
+
+        x = np.asarray([state.t for state in states])
+        y = np.asarray([state.y for state in states])
+        Z = np.asarray([state.Z for state in states[1:]])  # No ym on first point
+
+        from scipy.interpolate import PPoly
+
+        if x[-1] < x[0]:
+            reverse = True
+            x = x[::-1]
+            y = y[::-1]
+            Z = Z[::-1]
+
+            z0 = Z[:, 1] - Z[:, 2]
+            z1 = Z[:, 0] - Z[:, 2]
+            z2 = -Z[:, 2]
+        else:
+            reverse = False
+            z0 = Z[:, 0]
+            z1 = Z[:, 1]
+            z2 = Z[:, 2]
+
+        h = np.diff(x)[:, None]
+        n_points, n = y.shape
+        c = np.empty((4, n_points - 1, n))
+
+        if reverse:
+            c[0] = ((-10 + 15 * S6) * z0 - (10 + 15 * S6) * z1 + 30 * z2) / (3 * h ** 3)
+            c[1] = ((7 - 23 * S6) * z0 + (7 + 23 * S6) * z1 - 36 * z2) / (3 * h ** 2)
+            c[2] = ((1 + 8 * S6 / 3) * z0 + (1 - 8 * S6 / 3) * z1 + 3 * z2) / h
+        else:
+            c[0] = ((10 + 15 * S6) * z0 + (10 - 15 * S6) * z1 + 10 * z2) / (3 * h ** 3)
+            c[1] = -((23 + 22 * S6) * z0 + (23 - 22 * S6) * z1 + 8 * z2) / (3 * h ** 2)
+            c[2] = ((13 + 7 * S6) * z0 + (13 - 7 * S6) * z1 + z2) / (3 * h)
+        c[3] = y[:-1]
+
+        c = np.rollaxis(c, 2)
+        return PPoly(c, x, extrapolate=True, axis=1)
 
 
 def solve_collocation_system(fun, x, y, h, J, Z0, scale, tol, LU_real,
@@ -283,170 +415,3 @@ def predict_factor(h_abs, h_abs_old, error_norm, error_norm_old):
         factor = min(1, multiplier) * error_norm ** -0.25
 
     return factor
-
-
-def radau(fun, jac, a, b, ya, fa, Ja, rtol, atol, max_step,
-          events, is_terminal, direction):
-    """
-    Integrate an ODE by an implicit Runge-Kutta method of Radau IIA family.
-    """
-    s = np.sign(b - a)
-    h_abs = select_initial_step(fun, a, b, ya, fa, 5, rtol, atol)
-
-    newton_tol = max(10 * EPS / rtol, min(0.03, rtol ** 0.5))
-
-    x = a
-    y = ya
-    f = fa
-    J = Ja
-    current_jac = True
-
-    xs = [x]
-    ys = [y]
-    fs = [f]
-    Zs = []
-
-    if events is not None:
-        g = [event(x, y) for event in events]
-        x_events = [[] for _ in range(len(events))]
-    else:
-        x_events = None
-
-    LU_real = None
-    LU_complex = None
-
-    sol = None
-    rejected = True
-
-    h_abs_old = None
-    error_norm_old = None
-
-    status = None
-    while status is None:
-        if h_abs > max_step:
-            h_abs = max_step
-            h_abs_old = None
-            error_norm_old = None
-
-        d = abs(b - x)
-        if h_abs > d:
-            status = 0
-            h_abs = d
-            x_new = b
-            h = h_abs * s
-            h_abs_old = None
-            error_norm_old = None
-        else:
-            h = h_abs * s
-            x_new = x + h
-            if x_new == x:  # h less than spacing between numbers.
-                status = -1
-
-        if sol is None:
-            Z0 = np.zeros((3, y.shape[0]))
-        else:
-            Z0 = sol(x + h * C) - y
-
-        scale = atol + np.abs(y) * rtol
-        newton_status, n_iter, Z, f_new, theta, LU_real, LU_complex = \
-            solve_collocation_system(fun, x, y, h, J, Z0, scale,
-                                     newton_tol, LU_real, LU_complex)
-        if newton_status == 1:
-            status = None
-            rejected = True
-            if not current_jac:
-                J = jac(x, y)
-                h_abs *= 0.75
-            else:
-                h_abs *= 0.5
-            LU_real = None
-            LU_complex = None
-            continue
-
-        y_new = y + Z[-1]
-
-        ZE = Z.T.dot(E) / h
-        error = lu_solve(LU_real, f + ZE)
-        scale = atol + np.maximum(np.abs(y), np.abs(y_new)) * rtol
-        error_norm = norm(error / scale)
-        safety = 0.9 * (2 * NEWTON_MAXITER + 1) / (2 * NEWTON_MAXITER + n_iter)
-
-        if rejected and error_norm > 1:
-            error = lu_solve(LU_real, fun(x, y + error) + ZE)
-            error_norm = norm(error / scale)
-
-        if error_norm > 1:
-            factor = predict_factor(h_abs, h_abs_old,
-                                    error_norm, error_norm_old)
-            h_abs *= max(MIN_FACTOR, safety * factor)
-
-            status = None
-            rejected = True
-            LU_real = None
-            LU_complex = None
-            continue
-
-        sol = create_spline_one_step(x, x_new, y, Z)
-        if events is not None:
-            g_new = [event(x_new, y_new) for event in events]
-            active_events = get_active_events(g, g_new, direction)
-            g = g_new
-            if active_events.size > 0:
-                root_indices, roots, terminate = handle_events(
-                    sol, events, active_events, is_terminal, x, x_new)
-
-                for e, xe in zip(root_indices, roots):
-                    x_events[e].append(xe)
-
-                if terminate:
-                    status = 1
-                    x_new = roots[-1]
-                    y_new = sol(x_new)
-                    f_new = fun(x_new, y_new)
-                    Z = sol(x + (x_new - x) * C) - y
-
-        recompute_jac = jac is not None and n_iter > 1 and theta > 1e-3
-
-        factor = predict_factor(h_abs, h_abs_old, error_norm, error_norm_old)
-        factor = min(MAX_FACTOR, safety * factor)
-
-        if not recompute_jac and factor < 1.2:
-            factor = 1
-        else:
-            LU_real = None
-            LU_complex = None
-
-        if recompute_jac:
-            J = jac(x, y)
-            current_jac = True
-        elif jac is not None:
-            current_jac = False
-
-        h_abs_old = h_abs
-        h_abs *= factor
-        error_norm_old = error_norm
-
-        x = x_new
-        y = y_new
-        f = f_new
-
-        xs.append(x)
-        ys.append(y)
-        fs.append(f)
-        Zs.append(Z)
-
-        rejected = False
-
-    xs = np.asarray(xs)
-    ys = np.asarray(ys)
-    fs = np.asarray(fs)
-    Zs = np.asarray(Zs)
-
-    sol = create_spline(xs, ys, Zs)
-
-    if x_events:
-        x_events = [np.asarray(xe) for xe in x_events]
-        if len(x_events) == 1:
-            x_events = x_events[0]
-
-    return status, sol, xs, ys.T, fs.T, x_events

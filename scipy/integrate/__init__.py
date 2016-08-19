@@ -59,7 +59,7 @@ from .odepack import *
 from .quadpack import *
 from ._ode import *
 from ._bvp import solve_bvp
-from ._py import solve_ivp
+from ._py import SolverStatus, ivp_solution, RungaKutta23, RungaKutta45, Radau
 
 __all__ = [s for s in dir() if not s.startswith('_')]
 from numpy.testing import Tester
