@@ -39,12 +39,57 @@ MIN_FACTOR = 0.2  # Minimum allowed decrease in a step size.
 
 
 class Radau(OdeSolver):
+    """Radau stiff ODE solver
+
+    Implicit Runge-Kutta method of Radau IIA family of
+    order 5 [1]_. A 5-th order accurate cubic polynomial is available
+    naturally as the method can be viewed as a collocation method.
+
+    Parameters
+    ----------
+    t0 : float
+        The initial value of ``t``
+    y0 : array_like, shape (n,)
+        Initial values for ``y``
+    fun : callable, (t, y) -> ydot
+        The ODE system
+    jac : array_like, callable or None, optional
+        Jacobian matrix of the right-hand side of the system with respect to
+        ``y``. The Jacobian matrix has shape
+        (n, n) and its element (i, j) is equal to ``d f_i / d y_j``.
+        There are 3 ways to define the Jacobian:
+
+            * If array_like, then the Jacobian is assumed to be constant.
+            * If callable, then the Jacobian is assumed to depend on both
+              x and y, and will be called as ``jac(t, y)`` as necessary.
+            * If None (default), then the Jacobian will be approximated by
+              finite differences.
+
+        It is generally recommended to provided the Jacobian rather then
+        relying on finite difference approximation.
+    t_final : float
+        The boundary of the ODE system.
+    step_size : float or None
+        The initial step size
+    max_step : float
+        The maximum step size permitted
+    rtol : float
+        Relative tolerance
+    atol: float or array, shape (n,1)
+        Absolute tolerance
+
+    References
+    ----------
+    .. [1] E. Hairer, G. Wanner, "Solving Ordinary Differential Equations II:
+           Stiff and Differential-Algebraic Problems", Sec. IV.8.
+    """
     class OdeState(OdeSolver.OdeState):
         def __init__(self, t, y, Z=None):
             super().__init__(t, y)
             self.Z = Z
 
-    def __init__(self, t0, y0, fun, jac=None, *, t_final=np.inf, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6):
+    def __init__(self, t0, y0, fun, jac=None, *, t_final=np.inf,
+                 step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
         t0, t_final, y0, fun = self.check_arguments(t0, t_final, y0, fun)
 
         state = self.OdeState(t0, y0)

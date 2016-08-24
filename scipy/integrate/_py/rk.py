@@ -13,7 +13,65 @@ MAX_FACTOR = 5  # Maximum allowed increase in a step size.
 MIN_FACTOR = 0.2  # Minimum allowed decrease in a step size.
 
 
-class RungaKutta(OdeSolver):
+class RungeKutta(OdeSolver):
+    """Abstract base class for Runge-Kutta solvers
+
+    This abstract base class consolidates all the functionality of the Runge-Kutta
+    solvers. Built-in subclasses are ``RungeKutta23`` and ``RungaKutta45``.
+
+    Notation for Butcher tableau is as in [1]_.
+
+    Parameters
+    ----------
+    t0 : float
+        The initial value of ``t``
+    t_final : float
+        The boundary of the ODE system.
+    y0 : array_like, shape (n,)
+        Initial values for ``y``
+    fun : callable, (t, y) -> ydot
+        The ODE system
+    C : ndarray, shape (n_stages - 1,)
+        Coefficients for incrementing x for computing RK stages. The value for
+        the first stage is always zero, thus it is not stored.
+    A : list of ndarray, length n_stages - 1
+        Coefficients for combining previous RK stages for computing the next
+        stage. For explicit methods the coefficients above the main diagonal
+        are zeros, so they are stored as a list of arrays of increasing
+        lengths. The first stage is always just `f`, thus no coefficients are
+        required.
+    B : ndarray, shape (n_stages,)
+        Coefficients for combining RK stages for computing the final
+        prediction.
+    E : ndarray, shape (n_stages + 1,)
+        Coefficients for estimating the error of a less accurate method. They
+        are computed as the difference between b's in an extended tableau.
+    M : ndarray, shape (n_stages + 1,), or None
+        Coefficients to compute y(x + 0.5 * h) from RK stages with a 4-rd order
+        accuracy. Then it can be used for quartic interpolation with a 4-rd order
+        accuracy.
+    order : int
+        Order of local truncation error
+        # TODO: can this determined automatically from the other parameters
+    step_size : float or None
+        The initial step size
+    max_step : float
+        The maximum step size permitted
+    rtol : float
+        Relative tolerance
+    atol: float or array, shape (n,1)
+        Absolute tolerance
+
+    Attributes
+    ----------
+    f : array, shape (n,)
+        A convenience property that gets ``state.f``
+
+    References
+    ----------
+    .. [1] E. Hairer, S. P. Norsett G. Wanner, "Solving Ordinary Differential
+           Equations I: Nonstiff Problems", Sec. II.4.
+    """
     class OdeState(OdeSolver.OdeState):
         def __init__(self, t, y, f, ym=None):
             super().__init__(t, y)
@@ -220,8 +278,38 @@ def rk_step(fun, x, y, f, h, A, B, C, E, K):
     return y_new, f_new, error
 
 
-class RungaKutta23(RungaKutta):
-    def __init__(self, t0, y0, fun, *, t_final=np.inf, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6):
+class RungeKutta23(RungeKutta):
+    """Bogacki-Shampine Runge-Kutta ODE solver
+
+    An explicit Runge-Kutta method of order 3 with an automatic
+    step size control [1]_. A 3-th order accurate cubic Hermit
+    polynomial is used for the continuous extension.
+
+    Parameters
+    ----------
+    t0 : float
+        The initial value of ``t``
+    y0 : array_like, shape (n,)
+        Initial values for ``y``
+    fun : callable, (t, y) -> ydot
+        The ODE system
+    t_final : float
+        The boundary of the ODE system.
+    step_size : float or None
+        The initial step size
+    max_step : float
+        The maximum step size permitted
+    rtol : float
+        Relative tolerance
+    atol: float or array, shape (n,1)
+        Absolute tolerance
+
+    References
+    ----------
+    .. [1] P. Bogacki, L.F. Shampine, "A 3(2) Pair of Runge-Kutta Formulas",
+           Appl. Math. Lett. Vol. 2, No. 4. pp. 321-325, 1989.
+    """
+    def __init__(self, t0, y0, fun, *, t_final=np.inf, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
         # Bogacki–Shampine scheme.
         C23 = np.array([1 / 2, 3 / 4])
         A23 = [np.array([1 / 2]),
@@ -237,8 +325,43 @@ class RungaKutta23(RungaKutta):
                          step_size, max_step, rtol, atol)
 
 
-class RungaKutta45(RungaKutta):
-    def __init__(self, t0, y0, fun, *, t_final=np.inf, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6):
+class RungeKutta45(RungeKutta):
+    """Dormand-Prince Runge-Kutta ODE solver
+
+    An explicit Runge-Kutta method of order 5 with an
+    automatic step size control [1]_. A 4-th order accurate quartic
+    polynomial is used for the continuous extension [2]_. This is the
+    default ODE solver in scipy.
+
+    Parameters
+    ----------
+    t0 : float
+        The initial value of ``t``
+    y0 : array_like, shape (n,)
+        Initial values for ``y``
+    fun : callable, (t, y) -> ydot
+        The ODE system
+    t_final : float
+        The boundary of the ODE system.
+    step_size : float or None
+        The initial step size
+    max_step : float
+        The maximum step size permitted
+    rtol : float
+        Relative tolerance
+    atol: float or array, shape (n,1)
+        Absolute tolerance
+
+    References
+    ----------
+    .. [1] J. R. Dormand, P. J. Prince, "A family of embedded Runge-Kutta
+           formulae", Journal of Computational and Applied Mathematics, Vol. 6,
+           No. 1, pp. 19-26, 1980.
+    .. [2] L. W. Shampine, "Some Practical Runge-Kutta Formulas", Mathematics
+           of Computation,, Vol. 46, No. 173, pp. 135-150, 1986.
+    """
+
+    def __init__(self, t0, y0, fun, *, t_final=np.inf, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
         # Dormand–Prince scheme.
         C45 = np.array([1 / 5, 3 / 10, 4 / 5, 8 / 9, 1])
         A45 = [np.array([1 / 5]),

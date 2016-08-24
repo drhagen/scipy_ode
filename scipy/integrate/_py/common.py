@@ -2,7 +2,6 @@
 from __future__ import division, print_function, absolute_import
 
 import numpy as np
-from scipy.optimize import brentq, OptimizeResult
 
 
 EPS = np.finfo(float).eps
@@ -66,131 +65,6 @@ def select_initial_step(fun, a, b, ya, fa, order, rtol, atol):
         h1 = (0.01 / max(d1, d2)) ** (1 / order)
 
     return min(100 * h0, h1)
-
-
-def get_active_events(g, g_new, direction):
-    """Find which event occurred during an integration step.
-
-    Parameters
-    ----------
-    g, g_new : array_like, shape (n_events,)
-        Values of event functions at a current and next points.
-    direction : ndarray, shape (n_events,)
-        Event "direction" according to definition in `solve_ivp`.
-
-    Returns
-    -------
-    active_events : ndarray
-        Indices of events which occurred during the step.
-    """
-    g, g_new = np.asarray(g), np.asarray(g_new)
-    up = (g <= 0) & (g_new >= 0)
-    down = (g >= 0) & (g_new <= 0)
-    either = up | down
-    mask = (up & (direction > 0) |
-            down & (direction < 0) |
-            either & (direction == 0))
-
-    return np.nonzero(mask)[0]
-
-
-def handle_events(sol, events, active_events, is_terminal, x, x_new):
-    """Helper function to handle events.
-
-    Parameters
-    ----------
-    sol : callable
-        Function ``sol(x)`` which evaluates an ODE solution.
-    events : list of callables, length n_events
-        Event functions.
-    active_events : ndarray
-        Indices of events which occurred
-    is_terminal : ndarray, shape (n_events,)
-        Which events are terminate.
-    x, x_new : float
-        Previous and new values of the independed variable, it will be used as
-        a bracketing interval.
-
-    Returns
-    -------
-    root_indices : ndarray
-        Indices of events which take zero before a possible termination.
-    roots : ndarray
-        Values of x at which events take zero values.
-    terminate : bool
-        Whether a termination event occurred.
-    """
-    roots = []
-    for event_index in active_events:
-        roots.append(solve_event_equation(events[event_index], sol, x, x_new))
-
-    roots = np.asarray(roots)
-
-    if np.any(is_terminal[active_events]):
-        if x_new > x:
-            order = np.argsort(roots)
-        else:
-            order = np.argsort(-roots)
-        active_events = active_events[order]
-        roots = roots[order]
-        t = np.nonzero(is_terminal[active_events])[0][0]
-        active_events = active_events[:t + 1]
-        roots = roots[:t + 1]
-        terminate = True
-    else:
-        terminate = False
-
-    return active_events, roots, terminate
-
-
-def solve_event_equation(event, sol, x, x_new):
-    """Solve an equation corresponding to an ODE event.
-
-    The equation is ``event(x, y(x)) = 0``, here ``y(x)`` is known from an
-    ODE solver using some sort of interpolation. It is solved by
-    `scipy.optimize.brentq` with xtol=atol=4*EPS.
-
-    Parameters
-    ----------
-    event : callable
-        Function ``event(x, y)``.
-    sol : callable
-        Computed solution ``y(x)``. It should be defined only between `x` and
-        `x_new`.
-    x, x_new : float
-        Previous and new values of the independed variable, it will be used as
-        a bracketing interval.
-
-    Returns
-    -------
-    root : float
-        Found solution.
-    """
-    return brentq(lambda t: event(t, sol(t)), x, x_new, xtol=4 * EPS)
-
-
-def prepare_events(events):
-    if callable(events):
-        events = (events,)
-
-    if events is not None:
-        is_terminal = np.empty(len(events), dtype=bool)
-        direction = np.empty(len(events))
-        for i, event in enumerate(events):
-            try:
-                is_terminal[i] = event.terminate
-            except AttributeError:
-                is_terminal[i] = False
-
-            try:
-                direction[i] = event.direction
-            except AttributeError:
-                direction[i] = 0
-    else:
-        is_terminal = None
-        direction = None
-
-    return events, is_terminal, direction
 
 
 class PointSpline:
