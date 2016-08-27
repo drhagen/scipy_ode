@@ -193,7 +193,7 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
     return OdeSolution(t0, tF, n, solver.spline(states), t_events)
 
 
-class OdeSolution:
+class OdeSolution(object):
     def __init__(self, t0, tF, n, interpolator, t_events):
         self.n = n
         if t0 <= tF:
