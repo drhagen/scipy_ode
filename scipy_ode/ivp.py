@@ -205,7 +205,7 @@ class OdeSolution:
         self._interpolator = interpolator
         self.t_events = t_events
 
-    def __call__(self, t, iy=Ellipsis):
+    def __call__(self, t):
         def check_time(ti):
             if self.s == SolverDirection.forward and (ti < self.t0 or ti > self.tF) or \
                     self.s == SolverDirection.reverse and (ti > self.t0 or ti < self.tF):
@@ -219,7 +219,7 @@ class OdeSolution:
                 check_time(item)
 
         result = self._interpolator(t).T  # len(t) rows and
-        return result[..., iy]
+        return result
 
 
 def prepare_events(events):
