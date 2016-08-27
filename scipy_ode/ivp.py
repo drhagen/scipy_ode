@@ -265,11 +265,11 @@ class OdeSolutionLazy(object):
         self.extend(t)
         if t>=self.t0:
             i = np.searchsorted(self.ts_increasing,t)-1
-            return self.splines_increasing[i](t, derivative=derivative)
+            return self.splines_increasing[i].derivative(t, derivative)
         elif t<self.t0:
             i = np.searchsorted(self.ts_decreasing[::-1],t)-1
             #print(t,self.ts_decreasing[::-1],i)
-            return self.splines_decreasing[i](t, derivative=derivative)
+            return self.splines_decreasing[i].derivative(t, derivative)
         else:
             raise AssertionError("Extend error checking failed to validate call input")
 
