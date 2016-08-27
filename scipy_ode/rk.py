@@ -74,7 +74,7 @@ class RungeKutta(OdeSolver):
     """
     class OdeState(OdeSolver.OdeState):
         def __init__(self, t, y, f, ym=None):
-            super().__init__(t, y)
+            super(RungeKutta.OdeState, self).__init__(t, y)
             self.f = f
             self.ym = ym
 
@@ -84,7 +84,7 @@ class RungeKutta(OdeSolver):
         f0 = fun(t0, y0)
 
         state = self.OdeState(t0, y0, f0)
-        super().__init__(fun, state, t_crit)
+        super(RungeKutta,self).__init__(fun, state, t_crit)
 
         self.C = C
         self.A = A
@@ -309,8 +309,8 @@ class RungeKutta23(RungeKutta):
     .. [1] P. Bogacki, L.F. Shampine, "A 3(2) Pair of Runge-Kutta Formulas",
            Appl. Math. Lett. Vol. 2, No. 4. pp. 321-325, 1989.
     """
-    def __init__(self, fun, y0, t0=0, t_crit=np.inf, *, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
-        # Bogacki–Shampine scheme.
+    def __init__(self, fun, y0, t0=0, t_crit=np.inf, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
+        # Bogacki-Shampine scheme.
         C23 = np.array([1 / 2, 3 / 4])
         A23 = [np.array([1 / 2]),
                np.array([0, 3 / 4])]
@@ -321,7 +321,7 @@ class RungeKutta23(RungeKutta):
 
         order = 3
 
-        super().__init__(fun, y0, t0, t_crit, C23, A23, B23, E23, None, order, step_size, max_step, rtol, atol)
+        super(RungeKutta23, self).__init__(fun, y0, t0, t_crit, C23, A23, B23, E23, None, order, step_size, max_step, rtol, atol)
 
 
 class RungeKutta45(RungeKutta):
@@ -360,8 +360,8 @@ class RungeKutta45(RungeKutta):
            of Computation,, Vol. 46, No. 173, pp. 135-150, 1986.
     """
 
-    def __init__(self, fun, y0, t0=0, t_crit=np.inf, *, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
-        # Dormand–Prince scheme.
+    def __init__(self, fun, y0, t0=0, t_crit=np.inf, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
+        # Dormand-Prince scheme.
         C45 = np.array([1 / 5, 3 / 10, 4 / 5, 8 / 9, 1])
         A45 = [np.array([1 / 5]),
                np.array([3 / 40, 9 / 40]),
@@ -378,4 +378,4 @@ class RungeKutta45(RungeKutta):
 
         order = 5
 
-        super().__init__(fun, y0, t0, t_crit, C45, A45, B45, E45, M45, order, step_size, max_step, rtol, atol)
+        super(RungeKutta45,self).__init__(fun, y0, t0, t_crit, C45, A45, B45, E45, M45, order, step_size, max_step, rtol, atol)

@@ -85,15 +85,15 @@ class Radau(OdeSolver):
     """
     class OdeState(OdeSolver.OdeState):
         def __init__(self, t, y, Z=None):
-            super().__init__(t, y)
+            super(Radau.OdeState, self).__init__(t, y)
             self.Z = Z
 
-    def __init__(self, fun, y0, t0=0, t_crit=np.inf, jac=None, *, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6,
+    def __init__(self, fun, y0, t0=0, t_crit=np.inf, jac=None, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6,
                  **_):
         fun, y0, t0, t_crit = self.check_arguments(fun, y0, t0, t_crit)
 
         state = self.OdeState(t0, y0)
-        super().__init__(fun, state, t_crit)
+        super(Radau,self).__init__(fun, state, t_crit)
 
         if jac is None:
             def jac_wrapped(t, y):

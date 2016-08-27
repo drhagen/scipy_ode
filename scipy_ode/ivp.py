@@ -9,7 +9,7 @@ from .solver import SolverStatus, SolverDirection, IntegrationException
 from .rk import RungeKutta45
 
 
-def solve_ivp(fun, y0, t0, tF, *, method=RungeKutta45, events=None, **options):
+def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
     """Solve an initial value problem for a system of ODEs.
 
     This function numerically integrates a system of ODEs given an initial
@@ -193,7 +193,7 @@ def solve_ivp(fun, y0, t0, tF, *, method=RungeKutta45, events=None, **options):
     return OdeSolution(t0, tF, n, solver.spline(states), t_events)
 
 
-class OdeSolution:
+class OdeSolution(object):
     def __init__(self, t0, tF, n, interpolator, t_events):
         self.n = n
         if t0 <= tF:

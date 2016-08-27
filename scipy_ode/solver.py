@@ -6,7 +6,7 @@ import numpy as np
 from scipy.interpolate import interp1d
 
 
-class OdeSolver:
+class OdeSolver(object):
     """Abstract base class of ODE solvers
 
     This class defines the interface that an ODE solver class must satisfy.
@@ -56,7 +56,7 @@ class OdeSolver:
         Solvers should silently ignore any options that it doesn't understand.
         # TODO: do we want this to actually be silent
     """
-    class OdeState:
+    class OdeState(object):
         """Base class for state of ODE solvers
 
         This serves as a container for ``t`` and ``y``, which for the simplest solvers may be sufficient, but for
