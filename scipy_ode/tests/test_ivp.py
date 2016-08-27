@@ -167,11 +167,7 @@ def test_solution():
     for method in all_methods:
         sol = solve_ivp(lambda t, y: -y, [2, 3], 0, 4, method=method)
         assert_equal(sol(0), [2, 3])
-        assert_equal(sol(0, 1), 3)
         assert_equal(sol([0, 2, 4]).shape, (3, 2))
-        assert_equal(sol([0, 2, 4], 0).shape, (3,))
-        assert_equal(sol([0, 2, 4], [0, 1]).shape, (3, 2))
-        assert_equal(sol(2, [0, 1]).shape, (2,))
         assert_raises(ValueError, sol, -1)
         assert_raises(ValueError, sol, [1, 4.00000001])
 
