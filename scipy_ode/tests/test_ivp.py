@@ -3,7 +3,7 @@ from __future__ import division, print_function, absolute_import
 import numpy as np
 from numpy.testing import (assert_, assert_allclose, run_module_suite,
                            assert_equal, assert_raises)
-from scipy_ode.integrate import SolverStatus, solve_ivp, RungeKutta23, RungeKutta45, Radau
+from scipy_ode import SolverStatus, solve_ivp, RungeKutta23, RungeKutta45, Radau
 
 
 all_methods = [RungeKutta23, RungeKutta45, Radau]

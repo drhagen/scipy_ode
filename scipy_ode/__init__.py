@@ -59,7 +59,10 @@ from __future__ import division, print_function, absolute_import
 #from .quadpack import *
 #from ._ode import *
 #from ._bvp import solve_bvp
-from ._py import SolverStatus, solve_ivp, RungeKutta23, RungeKutta45, Radau
+from .ivp import solve_ivp
+from .solver import SolverStatus
+from .rk import RungeKutta23, RungeKutta45
+from .radau import Radau
 
 __all__ = [s for s in dir() if not s.startswith('_')]
 from numpy.testing import Tester
