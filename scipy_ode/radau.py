@@ -47,12 +47,14 @@ class Radau(OdeSolver):
 
     Parameters
     ----------
-    t0 : float
-        The initial value of ``t``
-    y0 : array_like, shape (n,)
-        Initial values for ``y``
     fun : callable, (t, y) -> ydot
         The ODE system
+    y0 : array_like, shape (n,)
+        Initial values for ``y``
+    t0 : float
+        The initial value of ``t``
+    t_crit : float
+        The boundary of the ODE system.
     jac : array_like, callable or None, optional
         Jacobian matrix of the right-hand side of the system with respect to
         ``y``. The Jacobian matrix has shape
@@ -67,8 +69,6 @@ class Radau(OdeSolver):
 
         It is generally recommended to provided the Jacobian rather then
         relying on finite difference approximation.
-    t_final : float
-        The boundary of the ODE system.
     step_size : float or None
         The initial step size
     max_step : float
@@ -88,12 +88,12 @@ class Radau(OdeSolver):
             super().__init__(t, y)
             self.Z = Z
 
-    def __init__(self, t0, y0, fun, jac=None, *, t_final=np.inf,
-                 step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
-        t0, t_final, y0, fun = self.check_arguments(t0, t_final, y0, fun)
+    def __init__(self, fun, y0, t0=0, t_crit=np.inf, jac=None, *, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6,
+                 **_):
+        fun, y0, t0, t_crit = self.check_arguments(fun, y0, t0, t_crit)
 
         state = self.OdeState(t0, y0)
-        super().__init__(state, fun, t_final)
+        super().__init__(fun, state, t_crit)
 
         if jac is None:
             def jac_wrapped(t, y):
@@ -124,7 +124,7 @@ class Radau(OdeSolver):
         self.newton_tol = max(10 * EPS / rtol, min(0.03, rtol ** 0.5))
 
         if step_size is None:
-            step_size = select_initial_step(self.fun, self.t, t_final, self.y, self.f, 5, rtol, atol)
+            step_size = select_initial_step(self.fun, self.t, t_crit, self.y, self.f, 5, rtol, atol)
         self.step_size = min(step_size, max_step)
 
         self.LU_real = None
@@ -149,7 +149,7 @@ class Radau(OdeSolver):
         fun = self.fun
         jac = self.jac
         s = self.direction
-        b = self.t_final
+        b = self.t_crit
 
         atol = self.atol
         rtol = self.rtol
@@ -175,13 +175,13 @@ class Radau(OdeSolver):
         while True:
             if h_abs > d:
                 h_abs = d
-                x_new = b
+                t_new = b
                 h = h_abs * s
                 h_abs_old = None
                 error_norm_old = None
             else:
                 h = h_abs * s
-                x_new = x + h
+                t_new = x + h
 
             if sol is None:
                 Z0 = np.zeros((3, y.shape[0]))
@@ -228,7 +228,7 @@ class Radau(OdeSolver):
             else:
                 break
 
-        state = self.OdeState(x_new, y_new, Z)
+        state = self.OdeState(t_new, y_new, Z)
         self.sol = self.spline([self.state, state])
         self.state = state
 
@@ -267,9 +267,9 @@ class Radau(OdeSolver):
         self.LU_real = LU_real
         self.LU_complex = LU_complex
 
-        if x_new == b:
+        if t_new == b:
             self.status = SolverStatus.finished
-        elif x_new == x:  # h less than spacing between numbers.
+        elif t_new == x:  # h less than spacing between numbers.
             self.status = SolverStatus.failed
         else:
             self.status = SolverStatus.running

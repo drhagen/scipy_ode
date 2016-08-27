@@ -17,7 +17,7 @@ class OdeSolver:
         The initial state of the system
     fun : callable, (t, y) -> ydot
         The ODE system
-    t_final : float
+    t_crit : float
         The boundary of the ODE system.
 
     Attributes
@@ -43,15 +43,15 @@ class OdeSolver:
     static member class, must override ``step`` instance method, and and should ``spline`` instance
     method. Furthermore, ``__init__`` must have a particular signature and follow a particular initialization procedure.
 
-    __init__ : ``(t0, y0, fun, *, t_final=float('inf'), **options)``
+    __init__ : ``(fun, y0, t0=0, t_crit=float('inf'), **options)``
         All end-user subclasses must be consistent with this signature. Abstract subclasses that act as base classes
         for other solvers may have whatever signature is appropriate. It is recommended that each initializer follow
         these steps in order to maximize code reuse.
-            1. Call ``t0, t_final, y0, fun = OdeSolver.check_arguments(t0, t_final, y0, fun)``
+            1. Call ``fun, y0, t0, t_crit = OdeSolver.check_arguments(fun, y0, t0, t_crit)``
                to perform standardization on those arguments.
             2. Call ``state = self.OdeState(t, y, ...)`` with whatever arguments are appropriate
                for the solver-specific ODE state class.
-            3. Call ``super().__init__(state, fun, t_final)``
+            3. Call ``super().__init__(fun, state, t_crit)``
             4. Perform any solver-specific initialization.
         Solvers should silently ignore any options that it doesn't understand.
         # TODO: do we want this to actually be silent
@@ -80,7 +80,7 @@ class OdeSolver:
             self.t = t
             self.y = y
 
-    def __init__(self, state, fun, t_final):
+    def __init__(self, fun, state, t_crit):
         self.state = state
 
         t0 = self.t
@@ -89,19 +89,19 @@ class OdeSolver:
         self.n = y0.size
 
         self.fun = fun
-        self.t_final = t_final
-        if t_final - t0 >= 0:
+        self.t_crit = t_crit
+        if t_crit - t0 >= 0:
             self.direction = SolverDirection.forward
         else:
             self.direction = SolverDirection.reverse
 
-        if t0 != t_final:
+        if t0 != t_crit:
             self.status = SolverStatus.started
         else:
             self.status = SolverStatus.finished
 
     @staticmethod
-    def check_arguments(t0, t_final, y0, fun):
+    def check_arguments(fun, y0, t0, t_crit):
         y0 = np.asarray(y0, dtype=float)  # TODO: give user control over dtype?
 
         if y0.ndim != 1:
@@ -111,7 +111,7 @@ class OdeSolver:
             # TODO: decide if passing args and kwargs should be supported f(self, t, y, *args, **kwargs)
             return np.asarray(fun(t, y))
 
-        return t0, t_final, y0, fun_wrapped
+        return fun_wrapped, y0, t0, t_crit
 
     @property
     def t(self):
@@ -153,11 +153,10 @@ class OdeSolver:
         time must only be dependent on the states adjacent to the requested time. Dropping earlier or later states and
         requesting a spline only for a section of the states must not change the values given by the middle section.
         """
-        # TODO: should this have an extrapolate parameter?
-        x = np.asarray([state.x for state in states])
+        t = np.asarray([state.t for state in states])
         y = np.asarray([state.y for state in states])
 
-        return interp1d(x, y, assume_sorted=True, kind='cubic')  # TODO: determine the best default interpolator
+        return interp1d(t, y, assume_sorted=True, kind='cubic')
 
 
 class SolverDirection(IntEnum):

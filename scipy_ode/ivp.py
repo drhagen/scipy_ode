@@ -9,7 +9,7 @@ from .solver import SolverStatus, SolverDirection, IntegrationException
 from .rk import RungeKutta45
 
 
-def solve_ivp(t0, tF, y0, fun, *, method=RungeKutta45, events=None, **options):
+def solve_ivp(fun, y0, t0, tF, *, method=RungeKutta45, events=None, **options):
     """Solve an initial value problem for a system of ODEs.
 
     This function numerically integrates a system of ODEs given an initial
@@ -23,17 +23,17 @@ def solve_ivp(t0, tF, y0, fun, *, method=RungeKutta45, events=None, **options):
 
     Parameters
     ----------
+    fun : callable
+        Right-hand side of the system. The calling signature is ``fun(t, y)``.
+        Here ``y`` is a scalar, and ``y`` is ndarray with shape (n,). It
+        must return an array_like with shape (n,).
+    y0 : array_like, shape (n,)
+        Initial value of ``y``
+        # TODO: allow for scalar y?
     t0 : float
         The initial value of ``t``
     tF : float
         The value of ``t`` at which to stop integration
-    y0 : array_like, shape (n,)
-        Initial values for ``y``
-        # TODO: allow for scalar y?
-    fun : callable
-        Right-hand side of the system. The calling signature is ``fun(x, y)``.
-        Here ``x`` is a scalar, and ``y`` is ndarray with shape (n,). It
-        must return an array_like with shape (n,).
     method : subclass of OdeSolver, optional
         The class of solver to use to integrate the system. Use one of the built-in solvers
         named below or see the base class `OdeSolver` on how to implement one yourself:
@@ -139,20 +139,20 @@ def solve_ivp(t0, tF, y0, fun, *, method=RungeKutta45, events=None, **options):
            Wikipedia.
     """
 
-    solver = method(t0, y0, fun, t_final=tF, **options)
+    solver = method(fun, y0, t0, tF, **options)
 
     scalar_events = callable(events)
     events, is_terminal, direction = prepare_events(events)
 
     n = solver.n
-    x = solver.t
+    t = solver.t
     y = solver.y
 
     if events is not None:
-        g = [event(x, y) for event in events]
-        x_events = [[] for _ in range(len(events))]
+        g = [event(t, y) for event in events]
+        t_events = [[] for _ in range(len(events))]
     else:
-        x_events = None
+        t_events = None
 
     states = [solver.state]
 
@@ -163,38 +163,38 @@ def solve_ivp(t0, tF, y0, fun, *, method=RungeKutta45, events=None, **options):
             sol = OdeSolution(t0, solver.t, n, solver.spline(states))
             raise IntegrationException("Step size has fallen below floating point precision", solver.t, sol)
 
-        x_new = solver.t
+        t_new = solver.t
         y_new = solver.y
         states.append(solver.state)
 
         if events is not None:
-            g_new = [event(x_new, y_new) for event in events]
+            g_new = [event(t_new, y_new) for event in events]
             active_events = get_active_events(g, g_new, direction)
             g = g_new
             if active_events.size > 0:
                 sol = solver.spline(states[-2:])
                 root_indices, roots, terminate = handle_events(
-                    sol, events, active_events, is_terminal, x, x_new)
+                    sol, events, active_events, is_terminal, t, t_new)
 
                 for e, xe in zip(root_indices, roots):
-                    x_events[e].append(xe)
+                    t_events[e].append(xe)
 
                 if terminate:
                     tF = roots[-1]
                     break
 
-        x = x_new
+        t = t_new
         y = y_new
 
     if scalar_events:
         # Convert to list rather than list of lists when events is scalar
-        x_events = x_events[0]
+        t_events = t_events[0]
 
-    return OdeSolution(t0, tF, n, solver.spline(states), x_events)
+    return OdeSolution(t0, tF, n, solver.spline(states), t_events)
 
 
 class OdeSolution:
-    def __init__(self, t0, tF, n, spline, t_events):
+    def __init__(self, t0, tF, n, interpolator, t_events):
         self.n = n
         if t0 <= tF:
             self.s = SolverDirection.forward
@@ -202,7 +202,7 @@ class OdeSolution:
             self.s = SolverDirection.reverse
         self.t0 = t0
         self.tF = tF
-        self._spline = spline
+        self._interpolator = interpolator
         self.t_events = t_events
 
     def __call__(self, t, iy=Ellipsis):
@@ -218,7 +218,7 @@ class OdeSolution:
             for item in t:
                 check_time(item)
 
-        result = self._spline(t).T  # len(t) rows and
+        result = self._interpolator(t).T  # len(t) rows and
         return result[..., iy]
 
 
@@ -272,7 +272,7 @@ def get_active_events(g, g_new, direction):
     return np.nonzero(mask)[0]
 
 
-def handle_events(sol, events, active_events, is_terminal, x, x_new):
+def handle_events(sol, events, active_events, is_terminal, t, t_new):
     """Helper function to handle events.
 
     Parameters
@@ -285,8 +285,8 @@ def handle_events(sol, events, active_events, is_terminal, x, x_new):
         Indices of events which occurred
     is_terminal : ndarray, shape (n_events,)
         Which events are terminate.
-    x, x_new : float
-        Previous and new values of the independed variable, it will be used as
+    t, t_new : float
+        Previous and new values of the independent variable, it will be used as
         a bracketing interval.
 
     Returns
@@ -300,12 +300,12 @@ def handle_events(sol, events, active_events, is_terminal, x, x_new):
     """
     roots = []
     for event_index in active_events:
-        roots.append(solve_event_equation(events[event_index], sol, x, x_new))
+        roots.append(solve_event_equation(events[event_index], sol, t, t_new))
 
     roots = np.asarray(roots)
 
     if np.any(is_terminal[active_events]):
-        if x_new > x:
+        if t_new > t:
             order = np.argsort(roots)
         else:
             order = np.argsort(-roots)
@@ -321,7 +321,7 @@ def handle_events(sol, events, active_events, is_terminal, x, x_new):
     return active_events, roots, terminate
 
 
-def solve_event_equation(event, sol, x, x_new):
+def solve_event_equation(event, sol, t, t_new):
     """Solve an equation corresponding to an ODE event.
 
     The equation is ``event(x, y(x)) = 0``, here ``y(x)`` is known from an
@@ -335,7 +335,7 @@ def solve_event_equation(event, sol, x, x_new):
     sol : callable
         Computed solution ``y(x)``. It should be defined only between `x` and
         `x_new`.
-    x, x_new : float
+    t, t_new : float
         Previous and new values of the independed variable, it will be used as
         a bracketing interval.
 
@@ -344,6 +344,6 @@ def solve_event_equation(event, sol, x, x_new):
     root : float
         Found solution.
     """
-    return brentq(lambda t: event(t, sol(t)), x, x_new, xtol=4 * EPS)
+    return brentq(lambda t: event(t, sol(t)), t, t_new, xtol=4 * EPS)
 
 

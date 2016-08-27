@@ -43,8 +43,7 @@ def test_integration():
     atol = 1e-6
     for method in all_methods:
         for x_span in ([5, 9], [5, 1]):
-            res = solve_ivp(x_span[0], x_span[1], [1 / 3, 2 / 9], fun_rational, rtol=rtol,
-                                     atol=atol, method=method)
+            res = solve_ivp(fun_rational, [1 / 3, 2 / 9], x_span[0], x_span[1], rtol=rtol, atol=atol, method=method)
             assert_equal(res.t0, x_span[0])
             assert_equal(res.tF, x_span[-1])
             assert_(res.t_events is None)
@@ -59,8 +58,7 @@ def test_events():
     event_rational_3.terminate = True
 
     for method in all_methods:
-        res = solve_ivp(5, 8, [1 / 3, 2 / 9], fun_rational, method=method,
-                                 events=(event_rational_1, event_rational_2))
+        res = solve_ivp(fun_rational, [1 / 3, 2 / 9], 5, 8, method=method, events=(event_rational_1, event_rational_2))
         assert_equal(res.tF, 8)
         assert_equal(len(res.t_events[0]), 1)
         assert_equal(len(res.t_events[1]), 1)
@@ -69,8 +67,7 @@ def test_events():
 
         event_rational_1.direction = 1
         event_rational_2.direction = 1
-        res = solve_ivp(5, 8, [1 / 3, 2 / 9], fun_rational, method=method,
-                                 events=(event_rational_1, event_rational_2))
+        res = solve_ivp(fun_rational, [1 / 3, 2 / 9], 5, 8, method=method, events=(event_rational_1, event_rational_2))
         assert_equal(res.tF, 8)
         assert_equal(len(res.t_events[0]), 1)
         assert_equal(len(res.t_events[1]), 0)
@@ -78,8 +75,7 @@ def test_events():
 
         event_rational_1.direction = -1
         event_rational_2.direction = -1
-        res = solve_ivp(5, 8, [1 / 3, 2 / 9], fun_rational, method=method,
-                                 events=(event_rational_1, event_rational_2))
+        res = solve_ivp(fun_rational, [1 / 3, 2 / 9], 5, 8, method=method, events=(event_rational_1, event_rational_2))
         assert_equal(res.tF, 8)
         assert_equal(len(res.t_events[0]), 0)
         assert_equal(len(res.t_events[1]), 1)
@@ -88,9 +84,8 @@ def test_events():
         event_rational_1.direction = 0
         event_rational_2.direction = 0
 
-        res = solve_ivp(5, 8, [1 / 3, 2 / 9], fun_rational, method=method,
-                                 events=(event_rational_1, event_rational_2,
-                                event_rational_3))
+        res = solve_ivp(fun_rational, [1 / 3, 2 / 9], 5, 8, method=method, events=(event_rational_1, event_rational_2,
+                                                                                   event_rational_3))
         assert_allclose(res.tF, 7.4)
         assert_equal(len(res.t_events[0]), 1)
         assert_equal(len(res.t_events[1]), 0)
@@ -108,8 +103,8 @@ def test_events():
     event_rational_1.direction = 0
     event_rational_2.direction = 0
     for method in all_methods:
-        res = solve_ivp(8, 5, [4 / 9, 20 / 81], fun_rational, method=method,
-                                 events=(event_rational_1, event_rational_2))
+        res = solve_ivp(fun_rational, [4 / 9, 20 / 81], 8, 5, method=method,
+                        events=(event_rational_1, event_rational_2))
         assert_equal(res.tF, 5)
         assert_equal(len(res.t_events[0]), 1)
         assert_equal(len(res.t_events[1]), 1)
@@ -118,8 +113,8 @@ def test_events():
 
         event_rational_1.direction = -1
         event_rational_2.direction = -1
-        res = solve_ivp(8, 5, [4 / 9, 20 / 81], fun_rational, method=method,
-                                 events=(event_rational_1, event_rational_2))
+        res = solve_ivp(fun_rational, [4 / 9, 20 / 81], 8, 5, method=method,
+                        events=(event_rational_1, event_rational_2))
         assert_equal(res.tF, 5)
         assert_equal(len(res.t_events[0]), 1)
         assert_equal(len(res.t_events[1]), 0)
@@ -127,8 +122,8 @@ def test_events():
 
         event_rational_1.direction = 1
         event_rational_2.direction = 1
-        res = solve_ivp(8, 5, [4 / 9, 20 / 81], fun_rational, method=method,
-                                 events=(event_rational_1, event_rational_2))
+        res = solve_ivp(fun_rational, [4 / 9, 20 / 81], 8, 5, method=method,
+                        events=(event_rational_1, event_rational_2))
         assert_equal(res.tF, 5)
         assert_equal(len(res.t_events[0]), 0)
         assert_equal(len(res.t_events[1]), 1)
@@ -137,9 +132,8 @@ def test_events():
         event_rational_1.direction = 0
         event_rational_2.direction = 0
 
-        res = solve_ivp(8, 5, [4 / 9, 20 / 81], fun_rational, method=method,
-                                 events=(event_rational_1, event_rational_2,
-                                event_rational_3))
+        res = solve_ivp(fun_rational, [4 / 9, 20 / 81], 8, 5, method=method, events=(event_rational_1, event_rational_2,
+                                                                                     event_rational_3))
         assert_allclose(res.tF, 7.4)
         assert_equal(len(res.t_events[0]), 0)
         assert_equal(len(res.t_events[1]), 1)
@@ -158,7 +152,7 @@ def test_step():
     for method in all_methods:
         t0 = 5
         y0 = [1/3, 2/9]
-        solver = method(t0, y0, fun_rational)
+        solver = method(fun_rational, y0, t0)
         assert_equal(solver.t, t0)
         assert_equal(solver.y, y0)
         assert_equal(solver.status, SolverStatus.started)
@@ -171,7 +165,7 @@ def test_step():
 
 def test_solution():
     for method in all_methods:
-        sol = solve_ivp(0, 4, [2, 3], lambda t, y: -y, method=method)
+        sol = solve_ivp(lambda t, y: -y, [2, 3], 0, 4, method=method)
         assert_equal(sol(0), [2, 3])
         assert_equal(sol(0, 1), 3)
         assert_equal(sol([0, 2, 4]).shape, (3, 2))
@@ -184,7 +178,7 @@ def test_solution():
 
 def test_no_integration():
     for method in all_methods:
-        sol = solve_ivp(4, 4, [2, 3], lambda t, y: -y, method=method)
+        sol = solve_ivp(lambda t, y: -y, [2, 3], 4, 4, method=method)
         assert_equal(sol(4), [2, 3])
         assert_equal(sol([4, 4, 4]), [[2, 3], [2, 3], [2, 3]])
 
@@ -195,7 +189,7 @@ def test_events_and_infinity():
     event.terminate = True
 
     for method in all_methods:
-        sol = solve_ivp(4, np.inf, [2, 3], lambda t, y: -y, method=method, events=event)
+        sol = solve_ivp(lambda t, y: -y, [2, 3], 4, np.inf, method=method, events=event)
         assert_allclose(sol(sol.t_events[0])[1], 0.1)
 
 
@@ -221,7 +215,7 @@ def test_equilibrium():
     known_reference = [4-3/2, 3-3/2, 3/2]  # Calculated by hand
 
     for method in all_methods:
-        sol = solve_ivp(0, 100, ic, fun, method=method)
+        sol = solve_ivp(fun, ic, 0, 100, method=method)
         dynamic_result = sol(1.5)
         if dynamic_reference is None:
             dynamic_reference = dynamic_result

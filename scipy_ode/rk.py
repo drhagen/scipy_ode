@@ -23,14 +23,14 @@ class RungeKutta(OdeSolver):
 
     Parameters
     ----------
-    t0 : float
-        The initial value of ``t``
-    t_final : float
-        The boundary of the ODE system.
-    y0 : array_like, shape (n,)
-        Initial values for ``y``
     fun : callable, (t, y) -> ydot
         The ODE system
+    y0 : array_like, shape (n,)
+        Initial values for ``y``
+    t0 : float
+        The initial value of ``t``
+    t_crit : float
+        The boundary of the ODE system.
     C : ndarray, shape (n_stages - 1,)
         Coefficients for incrementing x for computing RK stages. The value for
         the first stage is always zero, thus it is not stored.
@@ -78,13 +78,13 @@ class RungeKutta(OdeSolver):
             self.f = f
             self.ym = ym
 
-    def __init__(self, t0, t_final, y0, fun, C, A, B, E, M, order,
-                 step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6):
-        t0, t_final, y0, fun = self.check_arguments(t0, t_final, y0, fun)
+    def __init__(self, fun, y0, t0, t_crit, C, A, B, E, M, order, step_size=None, max_step=np.inf, rtol=1e-3,
+                 atol=1e-6):
+        fun, y0, t0, t_crit = self.check_arguments(fun, y0, t0, t_crit)
         f0 = fun(t0, y0)
 
         state = self.OdeState(t0, y0, f0)
-        super().__init__(state, fun, t_final)
+        super().__init__(fun, state, t_crit)
 
         self.C = C
         self.A = A
@@ -99,7 +99,7 @@ class RungeKutta(OdeSolver):
         self.atol = validate_atol(atol, self.n)
 
         if step_size is None:
-            step_size = select_initial_step(self.fun, self.t, t_final, self.y, self.f, order, rtol, atol)
+            step_size = select_initial_step(self.fun, self.t, t_crit, self.y, self.f, order, rtol, atol)
         self.step_size = min(step_size, max_step)
 
     @property
@@ -111,29 +111,29 @@ class RungeKutta(OdeSolver):
             # Only take a step is the solver is running
             return
 
-        x = self.t
+        t = self.t
         y = self.y
         h_abs = self.step_size
         s = self.direction
-        b = self.t_final
+        b = self.t_crit
         atol = self.atol
         rtol = self.rtol
         fun = self.fun
 
         f = self.f
-        d = abs(b - x)
+        d = abs(b - t)
 
         # Loop until an appropriately small step is taken
         while True:
             if h_abs > d:
                 h_abs = d
-                x_new = b
+                t_new = b
                 h = h_abs * s
             else:
                 h = h_abs * s
-                x_new = x + h
+                t_new = t + h
 
-            y_new, f_new, error = rk_step(fun, x, y, f, h, self.A, self.B, self.C, self.E, self.K)
+            y_new, f_new, error = rk_step(fun, t, y, f, h, self.A, self.B, self.C, self.E, self.K)
             scale = atol + np.maximum(np.abs(y), np.abs(y_new)) * rtol
             error_norm = norm(error / scale)
 
@@ -152,13 +152,13 @@ class RungeKutta(OdeSolver):
         else:
             ym = None
 
-        self.state = self.OdeState(x_new, y_new, fun(x_new, y_new), ym)
+        self.state = self.OdeState(t_new, y_new, fun(t_new, y_new), ym)
 
         self.step_size = h_abs
 
-        if x_new == b:
+        if t_new == b:
             self.status = SolverStatus.finished
-        elif x_new == x:  # h less than spacing between numbers.
+        elif t_new == t:  # h less than spacing between numbers.
             self.status = SolverStatus.failed
         else:
             self.status = SolverStatus.running
@@ -168,7 +168,7 @@ class RungeKutta(OdeSolver):
             state = states[0]
             return PointSpline(state.t, state.y)
 
-        x = np.asarray([state.t for state in states])
+        t = np.asarray([state.t for state in states])
         y = np.asarray([state.y for state in states])
         f = np.asarray([state.f for state in states])
         if self.M is not None:
@@ -176,14 +176,14 @@ class RungeKutta(OdeSolver):
         else:
             ym = None
 
-        if x[-1] < x[0]:
-            x = x[::-1]
+        if t[-1] < t[0]:
+            t = t[::-1]
             y = y[::-1]
             if ym is not None:
                 ym = ym[::-1]
             f = f[::-1]
 
-        h = np.diff(x)
+        h = np.diff(t)
 
         y0 = y[:-1]
         y1 = y[1:]
@@ -195,9 +195,9 @@ class RungeKutta(OdeSolver):
         if ym is None:
             c = np.empty((4, n_points - 1, n))
             slope = (y1 - y0) / h
-            t = (f0 + f1 - 2 * slope) / h
-            c[0] = t / h
-            c[1] = (slope - f0) / h - t
+            tt = (f0 + f1 - 2 * slope) / h
+            c[0] = tt / h
+            c[1] = (slope - f0) / h - tt
             c[2] = f0
             c[3] = y0
         else:
@@ -209,10 +209,10 @@ class RungeKutta(OdeSolver):
             c[4] = y0
 
         c = np.rollaxis(c, 2)
-        return PPoly(c, x, extrapolate=False, axis=1)
+        return PPoly(c, t, extrapolate=False, axis=1)
 
 
-def rk_step(fun, x, y, f, h, A, B, C, E, K):
+def rk_step(fun, t, y, f, h, A, B, C, E, K):
     """Perform a single Runge-Kutta step.
 
     This function computes a prediction of an explicit Runge-Kutta method and
@@ -224,7 +224,7 @@ def rk_step(fun, x, y, f, h, A, B, C, E, K):
     ----------
     fun : callable
         Right-hand side of the system.
-    x : float
+    t : float
         Current value of the independent variable.
     y : ndarray, shape (n,)
         Current value of the solution.
@@ -267,10 +267,10 @@ def rk_step(fun, x, y, f, h, A, B, C, E, K):
     K[0] = f
     for s, (a, c) in enumerate(zip(A, C)):
         dy = np.dot(K[:s + 1].T, a) * h
-        K[s + 1] = fun(x + c * h, y + dy)
+        K[s + 1] = fun(t + c * h, y + dy)
 
     y_new = y + h * np.dot(K[:-1].T, B)
-    f_new = fun(x + h, y_new)
+    f_new = fun(t + h, y_new)
 
     K[-1] = f_new
     error = np.dot(K.T, E) * h
@@ -287,13 +287,13 @@ class RungeKutta23(RungeKutta):
 
     Parameters
     ----------
-    t0 : float
-        The initial value of ``t``
-    y0 : array_like, shape (n,)
-        Initial values for ``y``
     fun : callable, (t, y) -> ydot
         The ODE system
-    t_final : float
+    y0 : array_like, shape (n,)
+        Initial values for ``y``
+    t0 : float
+        The initial value of ``t``
+    t_crit : float
         The boundary of the ODE system.
     step_size : float or None
         The initial step size
@@ -309,7 +309,7 @@ class RungeKutta23(RungeKutta):
     .. [1] P. Bogacki, L.F. Shampine, "A 3(2) Pair of Runge-Kutta Formulas",
            Appl. Math. Lett. Vol. 2, No. 4. pp. 321-325, 1989.
     """
-    def __init__(self, t0, y0, fun, *, t_final=np.inf, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
+    def __init__(self, fun, y0, t0=0, t_crit=np.inf, *, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
         # Bogacki–Shampine scheme.
         C23 = np.array([1 / 2, 3 / 4])
         A23 = [np.array([1 / 2]),
@@ -321,8 +321,7 @@ class RungeKutta23(RungeKutta):
 
         order = 3
 
-        super().__init__(t0, t_final, y0, fun, C23, A23, B23, E23, None, order,
-                         step_size, max_step, rtol, atol)
+        super().__init__(fun, y0, t0, t_crit, C23, A23, B23, E23, None, order, step_size, max_step, rtol, atol)
 
 
 class RungeKutta45(RungeKutta):
@@ -335,13 +334,13 @@ class RungeKutta45(RungeKutta):
 
     Parameters
     ----------
-    t0 : float
-        The initial value of ``t``
-    y0 : array_like, shape (n,)
-        Initial values for ``y``
     fun : callable, (t, y) -> ydot
         The ODE system
-    t_final : float
+    y0 : array_like, shape (n,)
+        Initial values for ``y``
+    t0 : float
+        The initial value of ``t``
+    t_crit : float
         The boundary of the ODE system.
     step_size : float or None
         The initial step size
@@ -361,7 +360,7 @@ class RungeKutta45(RungeKutta):
            of Computation,, Vol. 46, No. 173, pp. 135-150, 1986.
     """
 
-    def __init__(self, t0, y0, fun, *, t_final=np.inf, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
+    def __init__(self, fun, y0, t0=0, t_crit=np.inf, *, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6, **_):
         # Dormand–Prince scheme.
         C45 = np.array([1 / 5, 3 / 10, 4 / 5, 8 / 9, 1])
         A45 = [np.array([1 / 5]),
@@ -379,5 +378,4 @@ class RungeKutta45(RungeKutta):
 
         order = 5
 
-        super().__init__(t0, t_final, y0, fun, C45, A45, B45, E45, M45, order,
-                         step_size, max_step, rtol, atol)
+        super().__init__(fun, y0, t0, t_crit, C45, A45, B45, E45, M45, order, step_size, max_step, rtol, atol)
