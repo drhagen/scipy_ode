@@ -113,6 +113,11 @@ class OdeSolver(object):
 
         return fun_wrapped, y0, t0, t_crit
 
+    def assert_step_is_possible(self):
+        if self.status != SolverStatus.running and self.status != SolverStatus.started:
+            # Only take a step is the solver is running
+            raise ValueError("Attempt to step on a failed or finished solver")
+
     @property
     def t(self):
         return self.state.t
@@ -128,13 +133,11 @@ class OdeSolver(object):
         ``step_size``.
 
         This is an abstract method with no implementation in ``OdeSolver``. Concrete subclasses must implement this
-        method.
+        method. Implementations of ``step`` should first run `self.assert_step_is_possible()`.
         """
         raise NotImplementedError()
-        # TODO: determine what step does when called on a finished or failed solver possibilities:
-        # nothing, raise error, undefined
 
-    def spline(self, states):
+    def interpolator(self, states):
         """Construct an interpolator between a sequence of states
 
         Parameters
@@ -144,7 +147,7 @@ class OdeSolver(object):
 
         Returns
         -------
-        spline : callable, (t: ) -> y
+        interpolator : callable, (t: ) -> y
             If provided with a scalar time, returns the state at that time. If provided with a list of
             times, returns a of list of states at the corresponding times.
 

@@ -107,9 +107,7 @@ class RungeKutta(OdeSolver):
         return self.state.f
 
     def step(self):
-        if self.status != SolverStatus.running and self.status != SolverStatus.started:
-            # Only take a step is the solver is running
-            return
+        self.assert_step_is_possible()
 
         t = self.t
         y = self.y
@@ -163,7 +161,7 @@ class RungeKutta(OdeSolver):
         else:
             self.status = SolverStatus.running
 
-    def spline(self, states):
+    def interpolator(self, states):
         if len(states) == 1:
             state = states[0]
             return PointSpline(state.t, state.y)

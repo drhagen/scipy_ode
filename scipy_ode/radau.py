@@ -140,6 +140,8 @@ class Radau(OdeSolver):
         return self.fun(self.t, self.y)
 
     def step(self):
+        self.assert_step_is_possible()
+
         x = self.t
         y = self.y
         f = self.f
@@ -229,7 +231,7 @@ class Radau(OdeSolver):
                 break
 
         state = self.OdeState(t_new, y_new, Z)
-        self.sol = self.spline([self.state, state])
+        self.sol = self.interpolator([self.state, state])
         self.state = state
 
         recompute_jac = jac is not None and n_iter > 1 and theta > 1e-3
@@ -274,7 +276,7 @@ class Radau(OdeSolver):
         else:
             self.status = SolverStatus.running
 
-    def spline(self, states):
+    def interpolator(self, states):
         if len(states) == 1:
             state = states[0]
             return PointSpline(state.t, state.y)

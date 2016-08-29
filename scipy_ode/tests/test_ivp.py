@@ -9,48 +9,48 @@ from scipy_ode import SolverStatus, solve_ivp, RungeKutta23, RungeKutta45, Radau
 all_methods = [RungeKutta23, RungeKutta45, Radau]
 
 
-def fun_rational(x, y):
-    return np.array([y[1] / x,
-                     y[1] * (y[0] + 2 * y[1] - 1) / (x * (y[0] - 1))])
+def fun_rational(t, y):
+    return np.array([y[1] / t,
+                     y[1] * (y[0] + 2 * y[1] - 1) / (t * (y[0] - 1))])
 
 
-def jac_rational(x, y):
+def jac_rational(t, y):
     return np.array([
-        [0, 1 / x],
-        [-2 * y[1] ** 2 / (x * (y[0] - 1) ** 2),
-         (y[0] + 4 * y[1] - 1) / (x * (y[0] - 1))]
+        [0, 1 / t],
+        [-2 * y[1] ** 2 / (t * (y[0] - 1) ** 2),
+         (y[0] + 4 * y[1] - 1) / (t * (y[0] - 1))]
     ])
 
 
-def sol_rational(x):
-    return np.vstack((x / (x + 10), 10 * x / (x + 10)**2)).T
+def sol_rational(t):
+    return np.vstack((t / (t + 10), 10 * t / (t + 10) ** 2)).T
 
 
-def event_rational_1(x, y):
+def event_rational_1(t, y):
     return y[0] - y[1] ** 0.7
 
 
-def event_rational_2(x, y):
+def event_rational_2(t, y):
     return y[1] ** 0.6 - y[0]
 
 
-def event_rational_3(x, y):
-    return x - 7.4
+def event_rational_3(t, y):
+    return t - 7.4
 
 
 def test_integration():
     rtol = 1e-3
     atol = 1e-6
     for method in all_methods:
-        for x_span in ([5, 9], [5, 1]):
-            res = solve_ivp(fun_rational, [1 / 3, 2 / 9], x_span[0], x_span[1], rtol=rtol, atol=atol, method=method)
-            assert_equal(res.t0, x_span[0])
-            assert_equal(res.tF, x_span[-1])
+        for t_span in ([5, 9], [5, 1]):
+            res = solve_ivp(fun_rational, [1 / 3, 2 / 9], t_span[0], t_span[1], rtol=rtol, atol=atol, method=method)
+            assert_equal(res.t0, t_span[0])
+            assert_equal(res.tF, t_span[-1])
             assert_(res.t_events is None)
 
-            xc = np.linspace(*x_span)
-            yc_true = sol_rational(xc)
-            yc = res(xc)
+            tc = np.linspace(*t_span)
+            yc_true = sol_rational(tc)
+            yc = res(tc)
             assert_allclose(yc, yc_true, rtol=1e-2)
 
 
@@ -94,9 +94,9 @@ def test_events():
         assert_(7.3 < res.t_events[2][0] < 7.5)
 
         # Also test that termination by event doesn't break interpolants.
-        xc = np.linspace(res.t0, res.tF)
-        yc_true = sol_rational(xc)
-        yc = res(xc)
+        tc = np.linspace(res.t0, res.tF)
+        yc_true = sol_rational(tc)
+        yc = res(tc)
         assert_allclose(yc, yc_true, rtol=1e-2)
 
     # Test in backward direction.
@@ -142,9 +142,9 @@ def test_events():
         assert_(7.3 < res.t_events[2][0] < 7.5)
 
         # Also test that termination by event doesn't break interpolants.
-        xc = np.linspace(res.t0, res.tF)
-        yc_true = sol_rational(xc)
-        yc = res(xc)
+        tc = np.linspace(res.t0, res.tF)
+        yc_true = sol_rational(tc)
+        yc = res(tc)
         assert_allclose(yc, yc_true, rtol=1e-2)
 
 
@@ -224,9 +224,9 @@ def test_equilibrium():
 
 def test_parameters_validation():
     assert_raises(ValueError, solve_ivp, 1, 2, [[0, 0]], fun_rational)
-    assert_raises(ValueError, solve_ivp, 1, 2, [0, 0], lambda x, y: np.zeros(3))
+    assert_raises(ValueError, solve_ivp, 1, 2, [0, 0], lambda t, y: np.zeros(3))
     assert_raises(ValueError, solve_ivp, 1, 2, [0, 0], fun_rational,
-                  method=Radau, jac=lambda x, y: np.identity(3))
+                  method=Radau, jac=lambda t, y: np.identity(3))
     assert_raises(ValueError, solve_ivp, 1, 2, [0, 0], fun_rational,
                   method=Radau, jac=np.identity(3))
 

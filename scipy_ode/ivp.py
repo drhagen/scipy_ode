@@ -160,7 +160,7 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
         solver.step()
 
         if solver.status == SolverStatus.failed:
-            sol = OdeSolution(t0, solver.t, n, solver.spline(states))
+            sol = OdeSolution(t0, solver.t, n, solver.interpolator(states))
             raise IntegrationException("Step size has fallen below floating point precision", solver.t, sol)
 
         t_new = solver.t
@@ -172,7 +172,7 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
             active_events = get_active_events(g, g_new, direction)
             g = g_new
             if active_events.size > 0:
-                sol = solver.spline(states[-2:])
+                sol = solver.interpolator(states[-2:])
                 root_indices, roots, terminate = handle_events(
                     sol, events, active_events, is_terminal, t, t_new)
 
@@ -190,7 +190,7 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
         # Convert to list rather than list of lists when events is scalar
         t_events = t_events[0]
 
-    return OdeSolution(t0, tF, n, solver.spline(states), t_events)
+    return OdeSolution(t0, tF, n, solver.interpolator(states), t_events)
 
 
 class OdeSolution(object):
@@ -336,7 +336,7 @@ def solve_event_equation(event, sol, t, t_new):
         Computed solution ``y(x)``. It should be defined only between `x` and
         `x_new`.
     t, t_new : float
-        Previous and new values of the independed variable, it will be used as
+        Previous and new values of the independent variable, it will be used as
         a bracketing interval.
 
     Returns
@@ -344,6 +344,4 @@ def solve_event_equation(event, sol, t, t_new):
     root : float
         Found solution.
     """
-    return brentq(lambda t: event(t, sol(t)), t, t_new, xtol=4 * EPS)
-
-
+    return brentq(lambda x: event(x, sol(x)), t, t_new, xtol=4 * EPS)
