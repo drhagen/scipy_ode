@@ -2,7 +2,7 @@ from __future__ import division, print_function, absolute_import
 
 import numpy as np
 from numpy.testing import (assert_, assert_allclose, run_module_suite,
-                           assert_equal, assert_raises)
+                           assert_equal, assert_raises, assert_no_warnings)
 from scipy_ode import SolverStatus, solve_ivp, RungeKutta23, RungeKutta45, Radau
 
 
@@ -220,6 +220,17 @@ def test_equilibrium():
 
         static_result = sol(100)
         assert_allclose(static_result, known_reference, rtol=1e-2)
+
+
+def test_flat():
+    def fun(t, y):
+        return np.zeros(y.shape)
+
+    ic = [0, 0]
+
+    for method in all_methods:
+        sol = assert_no_warnings(solve_ivp, fun, ic, 0, 10, method=method)
+        assert_allclose(sol(10), [0, 0], rtol=1e-2)
 
 
 def test_parameters_validation():

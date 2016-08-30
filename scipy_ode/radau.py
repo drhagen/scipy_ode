@@ -453,7 +453,8 @@ def predict_factor(h_abs, h_abs_old, error_norm, error_norm_old):
            Equations II: Stiff and Differential-Algebraic Problems", Sec. IV.8.
     """
     with np.errstate(divide='ignore'):
-        if error_norm_old is None or h_abs_old is None:
+        if error_norm_old is None or h_abs_old is None \
+                or error_norm_old == 0 or error_norm == 0:
             multiplier = 1
         else:
             multiplier = h_abs / h_abs_old * (error_norm_old /
