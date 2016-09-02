@@ -233,6 +233,17 @@ def test_flat():
         assert_allclose(sol(10), [0, 0], rtol=1e-2)
 
 
+def test_empty():
+    def fun(t, y):
+        return np.zeros((0,))
+
+    ic = np.zeros((0,))
+
+    for method in all_methods:
+        sol = assert_no_warnings(solve_ivp, fun, ic, 0, 10, method=method)
+        assert_equal(sol(10), np.zeros((0,)))
+
+
 def test_parameters_validation():
     assert_raises(ValueError, solve_ivp, 1, 2, [[0, 0]], fun_rational)
     assert_raises(ValueError, solve_ivp, 1, 2, [0, 0], lambda t, y: np.zeros(3))

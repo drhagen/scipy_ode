@@ -46,6 +46,9 @@ def select_initial_step(fun, a, b, ya, fa, order, rtol, atol):
     .. [1] E. Hairer, S. P. Norsett G. Wanner, "Solving Ordinary Differential
            Equations I: Nonstiff Problems", Sec. II.4.
     """
+    if ya.size == 0:
+        return np.inf
+
     scale = atol + np.abs(ya) * rtol
     d0 = norm(ya / scale)
     d1 = norm(fa / scale)

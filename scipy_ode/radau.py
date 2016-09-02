@@ -142,6 +142,14 @@ class Radau(OdeSolver):
     def step(self):
         self.assert_step_is_possible()
 
+        if self.n == 0:
+            # Handle degenerate case of size-0 state
+            self.state = self.OdeState(self.state.t + self.max_step, np.zeros(self.state.y.shape),
+                                       np.zeros(self.state.y.shape))
+            if self.state.t >= self.t_crit:
+                self.status = SolverStatus.finished
+            return
+
         x = self.t
         y = self.y
         f = self.f
@@ -280,6 +288,12 @@ class Radau(OdeSolver):
         if len(states) == 1:
             state = states[0]
             return PointSpline(state.t, state.y)
+
+        if states[0].y.size == 0:
+            # Handle degenerate case of size-0 state
+            def always_return_empty(ts):
+                return np.zeros(np.shape(ts) + (0,))
+            return always_return_empty
 
         x = np.asarray([state.t for state in states])
         y = np.asarray([state.y for state in states])

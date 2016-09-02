@@ -95,10 +95,10 @@ class OdeSolver(object):
         else:
             self.direction = SolverDirection.reverse
 
-        if t0 != t_crit:
-            self.status = SolverStatus.started
-        else:
+        if t0 == t_crit:
             self.status = SolverStatus.finished
+        else:
+            self.status = SolverStatus.started
 
     @staticmethod
     def check_arguments(fun, y0, t0, t_crit):
