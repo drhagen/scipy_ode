@@ -144,13 +144,13 @@ class RungeKutta(OdeSolver):
             error_norm = norm(error / scale)
 
             if error_norm > 1:
-                h_abs *= max(MIN_FACTOR, SAFETY * error_norm ** (-1 / self.order))
+                h_abs *= max(MIN_FACTOR, SAFETY * error_norm ** (-1 / (self.order + 1)))
                 continue
             else:
                 break
 
         with np.errstate(divide='ignore'):
-            h_abs *= min(MAX_FACTOR, max(1, SAFETY * error_norm**(-1/self.order)))
+            h_abs *= min(MAX_FACTOR, max(1, SAFETY * error_norm ** (-1 / (self.order + 1))))
         h_abs = min(h_abs, self.max_step)
 
         if self.M is not None:
@@ -331,7 +331,7 @@ class RungeKutta23(RungeKutta):
         # and higher order accuracy methods.
         E23 = np.array([5 / 72, -1 / 12, -1 / 9, 1 / 8])
 
-        order = 3
+        order = 2
 
         super(RungeKutta23, self).__init__(fun, y0, t0, t_crit, C23, A23, B23, E23, None, order, step_size, max_step, rtol, atol)
 
@@ -388,6 +388,6 @@ class RungeKutta45(RungeKutta):
         # accuracy.
         M45 = np.array([613 / 3072, 0, 125 / 159, -125 / 1536, 8019 / 54272, -11 / 96, 1 / 16])
 
-        order = 5
+        order = 4
 
         super(RungeKutta45,self).__init__(fun, y0, t0, t_crit, C45, A45, B45, E45, M45, order, step_size, max_step, rtol, atol)
