@@ -10,7 +10,7 @@ from .rk import RungeKutta45
 
 
 def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
-    """Solve an initial value problem for a system of ODEs.
+    """Produce continuous solution to initial value problem for a system of ODEs.
 
     This function numerically integrates a system of ODEs given an initial
     value until a terminal value:
@@ -25,18 +25,17 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
     ----------
     fun : callable
         Right-hand side of the system. The calling signature is ``fun(t, y)``.
-        Here ``y`` is a scalar, and ``y`` is ndarray with shape (n,). It
+        Here ``t`` is a scalar, and ``y`` is ndarray with shape (n,). It
         must return an array_like with shape (n,).
     y0 : array_like, shape (n,)
         Initial value of ``y``
-        # TODO: allow for scalar y?
     t0 : float
         The initial value of ``t``
     tF : float
         The value of ``t`` at which to stop integration
-    method : subclass of OdeSolver, optional
+    method : subclass of ``OdeSolver``, optional
         The class of solver to use to integrate the system. Use one of the built-in solvers
-        named below or see the base class `OdeSolver` on how to implement one yourself:
+        named below or see the base class `OdeSolver` on how to implement a new one:
             * ``RungeKutta45`` (default): Explicit Runge-Kutta method of order 5 with an
               automatic step size control [1]_. A 4-th order accurate quartic
               polynomial is used for the continuous extension [2]_.
@@ -52,26 +51,24 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
         and if it does unusually many iterations or diverges then your problem
         is likely to be stiff and you should use ``Radau``.
     events : callable, list of callables or None, optional
-        Events to track. Events are defined by functions which take
-        a zero value at a point of an event. Each function must have a
-        signature ``event(x, y)`` and return float, the solver will find an
-        accurate value of ``x`` at which ``event(x, y(x)) = 0`` using a root
-        finding algorithm. Additionally each ``event`` function might have
+        Events to track.  If None (default), events won't be tracked. Events are
+        defined by functions which take a zero value at a point of an event. Each
+        function must have a signature ``event(t, y)`` and return float, the solver
+        will find an accurate value of ``t`` at which ``event(t, y(t)) = 0`` using
+        a root finding algorithm. Additionally each event function might have
         attributes:
-
-            * terminate: bool, whether to terminate integration if this
+            * terminal: bool, whether to terminate integration if this
               event occurs. Implicitly False if not assigned.
-              # TODO: should this be "terminal"
             * direction: float, direction of crossing a zero. If `direction`
               is positive then `event` must go from negative to positive, and
               vice-versa if `direction` is negative. If 0, then either way will
               count. Implicitly 0 if not assigned.
-        You can assign attributes like ``event.terminate = True`` to any
-        function in Python. If None (default), events won't be tracked.
+        You can assign attributes like ``event.terminal = True`` to any
+        function in Python.
     options
         Additional keyword options passed to the solver. All options understood by any built-in
         solver are listed below. Not all options are understood by all solvers.
-        See the individual solver docs for more information.
+        See the individual solvers for more information.
     * rtol, atol : float and array_like, optional
         Relative and absolute tolerances. The solver keeps the error estimates
         less than ``atol` + rtol * abs(y)``. Here `rtol` controls a relative
@@ -86,7 +83,7 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
         Maximum allowed step size. Default is infinity.
     * jac : array_like, callable or None, optional
         Jacobian matrix of the right-hand side of the system with respect to
-        ```y`, required only by ``Radau`` method. The Jacobian matrix has shape
+        ``y``, required only by ``Radau`` method. The Jacobian matrix has shape
         (n, n) and its element (i, j) is equal to ``d f_i / d y_j``.
         There are 3 ways to define the Jacobian:
 
@@ -96,7 +93,7 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
             * If None (default), then the Jacobian will be approximated by
               finite differences.
 
-        It is generally recommended to provided the Jacobian rather then
+        It is generally recommended to provide the Jacobian rather then
         relying on finite difference approximation.
 
     Returns
@@ -107,7 +104,6 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
         scalar, then ``y`` is a vector of shape (n,). If ``t`` is a vector of shape
         (nt,), then ``y`` is a matrix of shape (nt,n). All values in ``t`` must be between
         ``t0`` and ``tF``.
-        # TODO: should y be scalar when fun returns a scalar?
     n : int
         Size of system
     t0, tF : float
