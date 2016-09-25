@@ -4,7 +4,7 @@ from __future__ import division, print_function, absolute_import
 import numpy as np
 from scipy.optimize import brentq
 
-from .common import EPS
+from .common import EPS, PointSpline
 from .solver import SolverStatus, SolverDirection, IntegrationException
 from .rk import RungeKutta45
 
@@ -150,27 +150,28 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
     else:
         t_events = None
 
-    states = [solver.state]
+    interpolations = []
 
     while solver.status == SolverStatus.running or solver.status == SolverStatus.started:
         solver.step()
 
         if solver.status == SolverStatus.failed:
-            sol = OdeSolution(t0, solver.t, n, solver.interpolator(states))
+            sol = OdeSolution(t0, solver.t, n, interpolations)
             raise IntegrationException("Step size has fallen below floating point precision", solver.t, sol)
+
+        interpolation = solver.interpolator()
 
         t_new = solver.t
         y_new = solver.y
-        states.append(solver.state)
+        interpolations.append(interpolation)
 
         if events is not None:
             g_new = [event(t_new, y_new) for event in events]
             active_events = get_active_events(g, g_new, direction)
             g = g_new
             if active_events.size > 0:
-                sol = solver.interpolator(states[-2:])
                 root_indices, roots, terminate = handle_events(
-                    sol, events, active_events, is_terminal, t, t_new)
+                    interpolation, events, active_events, is_terminal, t, t_new)
 
                 for e, xe in zip(root_indices, roots):
                     t_events[e].append(xe)
@@ -186,36 +187,51 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
         # Convert to list rather than list of lists when events is scalar
         t_events = t_events[0]
 
-    return OdeSolution(t0, tF, n, solver.interpolator(states), t_events)
+    if t0 == tF:
+        # Handle degenerate case of no integration
+        return OdeSolution(t0, tF, n, [PointSpline(t0, y0)], t_events)
+    else:
+        return OdeSolution(t0, tF, n, interpolations, t_events)
 
 
 class OdeSolution(object):
-    def __init__(self, t0, tF, n, interpolator, t_events):
+    def __init__(self, t0, tF, n, interpolations, t_events):
+        self._ts = np.asarray([interpolation.t_end for interpolation in interpolations])
+        self._interpolations = interpolations
         self.n = n
-        if t0 <= tF:
-            self.s = SolverDirection.forward
-        else:
-            self.s = SolverDirection.reverse
         self.t0 = t0
         self.tF = tF
-        self._interpolator = interpolator
+        if t0 <= tF:
+            self.s = SolverDirection.forward
+            self._ts = np.asarray([interpolation.t_end for interpolation in interpolations])
+            self._interpolations = interpolations
+        else:
+            self.s = SolverDirection.reverse
+            _ts = [interpolation.t_start for interpolation in interpolations]
+            _ts.reverse()
+            self._ts = np.asarray(_ts)
+            self._interpolations = interpolations[::-1]
         self.t_events = t_events
 
+    def check_time(self, ti):
+        if self.s == SolverDirection.forward and (ti < self.t0 or ti > self.tF) or \
+                                self.s == SolverDirection.reverse and (ti > self.t0 or ti < self.tF):
+            raise ValueError("Requested time {} is outside the solution interval [{}, {}]"
+                             .format(ti, self.t0, self.tF))
+
     def __call__(self, t):
-        def check_time(ti):
-            if self.s == SolverDirection.forward and (ti < self.t0 or ti > self.tF) or \
-                    self.s == SolverDirection.reverse and (ti > self.t0 or ti < self.tF):
-                raise ValueError("Requested time {} is outside the solution interval [{}, {}]"
-                                 .format(ti, self.t0, self.tF))
-
         if np.isscalar(t):
-            check_time(t)
+            ind = np.searchsorted(self._ts, t)
+            self.check_time(t)
+            return self._interpolations[ind](t)
         else:
-            for item in t:
-                check_time(item)
-
-        result = self._interpolator(t).T  # len(t) rows and
-        return result
+            t = np.asarray(t)
+            inds = np.searchsorted(self._ts, t)
+            result = np.empty((t.size, self.n))
+            for i, ti in enumerate(t):
+                self.check_time(ti)
+                result[i] = self._interpolations[inds[i]](ti)
+            return result
 
 
 def prepare_events(events):

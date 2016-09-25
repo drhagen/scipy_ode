@@ -72,23 +72,29 @@ def select_initial_step(fun, a, b, ya, fa, order, rtol, atol):
 
 class PointSpline:
     # scipy interpolators don't interpolate single points
-    def __init__(self, x, y):
-        self.x = x
+    def __init__(self, t, y):
+        self.t_start = t
+        self.t_end = t
+        self.t = t
         self.y = y
 
-    def __call__(self, x):
-        def check_x(xi):
-            if xi < self.x or xi > self.x:
-                raise ValueError("Value {} is outside the solution interval [{}, {}]"
-                                 .format(xi, self.x, self.x))
-
-        if np.isscalar(x):
-            check_x(x)
+    def __call__(self, t):
+        if np.isscalar(t):
             return self.y
         else:
-            for item in x:
-                check_x(item)
-            return np.tile(self.y, (len(x), 1)).T
+            return np.tile(self.y, (len(t), 1)).T
+
+
+class EmptySpline:
+    def __init__(self, t_start, t_end):
+        self.t_start = t_start
+        self.t_end = t_end
+
+    def __call__(self, t):
+        if np.isscalar(t):
+            return np.empty((0,))
+        else:
+            return np.empty((len(t), 0))
 
 
 def validate_rtol(rtol):

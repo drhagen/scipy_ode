@@ -2,10 +2,11 @@ from __future__ import division, print_function, absolute_import
 
 import numpy as np
 from scipy.linalg import lu_factor, lu_solve
+from scipy.interpolate import PPoly
 from scipy.optimize._numdiff import approx_derivative
 
 from .solver import OdeSolver, SolverStatus
-from .common import select_initial_step, norm, EPS, PointSpline, validate_rtol, validate_atol
+from .common import select_initial_step, norm, EPS, PointSpline, EmptySpline, validate_rtol, validate_atol
 
 S6 = 6 ** 0.5
 
@@ -83,17 +84,15 @@ class Radau(OdeSolver):
     .. [1] E. Hairer, G. Wanner, "Solving Ordinary Differential Equations II:
            Stiff and Differential-Algebraic Problems", Sec. IV.8.
     """
-    class OdeState(OdeSolver.OdeState):
-        def __init__(self, t, y, Z=None):
-            super(Radau.OdeState, self).__init__(t, y)
-            self.Z = Z
-
     def __init__(self, fun, y0, t0=0, t_crit=np.inf, jac=None, step_size=None, max_step=np.inf, rtol=1e-3, atol=1e-6,
                  **_):
-        fun, y0, t0, t_crit = self.check_arguments(fun, y0, t0, t_crit)
+        fun, y0, t0, t_crit = self.initialize(fun, y0, t0, t_crit)
 
-        state = self.OdeState(t0, y0)
-        super(Radau,self).__init__(fun, state, t_crit)
+        self.t_previous = None
+        self.y_previous = None
+        self.t = t0
+        self.y = y0
+        self.Z = None
 
         if jac is None:
             def jac_wrapped(t, y):
@@ -130,8 +129,6 @@ class Radau(OdeSolver):
         self.LU_real = None
         self.LU_complex = None
 
-        self.sol = None
-
         self.h_abs_old = None
         self.error_norm_old = None
 
@@ -144,13 +141,17 @@ class Radau(OdeSolver):
 
         if self.n == 0:
             # Handle degenerate case of size-0 state
-            self.state = self.OdeState(self.state.t + self.max_step, np.zeros(self.state.y.shape),
-                                       np.zeros(self.state.y.shape))
-            if self.state.t >= self.t_crit:
+            self.t_previous = self.t
+            self.y_previous = self.y
+            self.Z = np.zeros(self.y.shape)
+
+            self.t = min(self.t + self.max_step, self.t_crit)
+
+            if self.t >= self.t_crit:
                 self.status = SolverStatus.finished
             return
 
-        x = self.t
+        t = self.t
         y = self.y
         f = self.f
         J = self.J
@@ -173,14 +174,17 @@ class Radau(OdeSolver):
         LU_real = self.LU_real
         LU_complex = self.LU_complex
 
-        sol = self.sol  # The extrapolatable solution from the previous step
+        if self.status == SolverStatus.started:
+            sol = None
+        else:
+            sol = self.interpolator()  # The extrapolatable solution from the previous step
 
         if self.status == SolverStatus.started:
             rejected = True
         else:
             rejected = False
 
-        d = abs(b - x)
+        d = abs(b - t)
 
         while True:
             if h_abs > d:
@@ -191,22 +195,22 @@ class Radau(OdeSolver):
                 error_norm_old = None
             else:
                 h = h_abs * s
-                t_new = x + h
+                t_new = t + h
 
             if sol is None:
                 Z0 = np.zeros((3, y.shape[0]))
             else:
-                Z0 = sol(x + h * C).T - y
+                Z0 = sol(t + h * C) - y
 
             scale = atol + np.abs(y) * rtol
             newton_status, n_iter, Z, f_new, theta, LU_real, LU_complex = \
-                solve_collocation_system(fun, x, y, h, J, Z0, scale,
+                solve_collocation_system(fun, t, y, h, J, Z0, scale,
                                          newton_tol, LU_real, LU_complex)
 
             if newton_status == 1:
                 rejected = True
                 if not current_jac:
-                    J = jac(x, y)
+                    J = jac(t, y)
                     h_abs *= 0.75
                 else:
                     h_abs *= 0.5
@@ -223,7 +227,7 @@ class Radau(OdeSolver):
             safety = 0.9 * (2 * NEWTON_MAXITER + 1) / (2 * NEWTON_MAXITER + n_iter)
 
             if rejected and error_norm > 1:
-                error = lu_solve(LU_real, fun(x, y + error) + ZE)
+                error = lu_solve(LU_real, fun(t, y + error) + ZE)
                 error_norm = norm(error / scale)
 
             if error_norm > 1:
@@ -238,9 +242,11 @@ class Radau(OdeSolver):
             else:
                 break
 
-        state = self.OdeState(t_new, y_new, Z)
-        self.sol = self.interpolator([self.state, state])
-        self.state = state
+        self.t_previous = t
+        self.y_previous = y
+        self.t = t_new
+        self.y = y_new
+        self.Z = Z
 
         recompute_jac = jac is not None and n_iter > 1 and theta > 1e-3
 
@@ -254,7 +260,7 @@ class Radau(OdeSolver):
             LU_complex = None
 
         if recompute_jac:
-            J = jac(x, y)
+            J = jac(t, y)
             current_jac = True
         elif jac is not None:
             current_jac = False
@@ -279,46 +285,42 @@ class Radau(OdeSolver):
 
         if t_new == b:
             self.status = SolverStatus.finished
-        elif t_new == x:  # h less than spacing between numbers.
+        elif t_new == t:  # h less than spacing between numbers.
             self.status = SolverStatus.failed
         else:
             self.status = SolverStatus.running
 
-    def interpolator(self, states):
-        if len(states) == 1:
-            state = states[0]
-            return PointSpline(state.t, state.y)
+    def interpolator(self):
+        if self.n == 0:
+            return EmptySpline(self.t_previous, self.t)
 
-        if states[0].y.size == 0:
-            # Handle degenerate case of size-0 state
-            def always_return_empty(ts):
-                return np.zeros(np.shape(ts) + (0,))
-            return always_return_empty
+        if self.t_previous == self.t:
+            return PointSpline(self.t, self.y)
 
-        x = np.asarray([state.t for state in states])
-        y = np.asarray([state.y for state in states])
-        Z = np.asarray([state.Z for state in states[1:]])  # No ym on first point
+        return RadauInterpolator(self.t_previous, self.t, self.y_previous, self.Z)
 
-        from scipy.interpolate import PPoly
 
-        if x[-1] < x[0]:
+class RadauInterpolator:
+    def __init__(self, t_start, t_end, y_start, Z):
+        self.t_start = t_start
+        self.t_end = t_end
+
+        if t_end < t_start:
             reverse = True
-            x = x[::-1]
-            y = y[::-1]
-            Z = Z[::-1]
-
-            z0 = Z[:, 1] - Z[:, 2]
-            z1 = Z[:, 0] - Z[:, 2]
-            z2 = -Z[:, 2]
+            t_end, t_start = t_start, t_end
+            y_start = y_start + Z[2]
+            z0 = Z[1] - Z[2]
+            z1 = Z[0] - Z[2]
+            z2 = -Z[2]
         else:
             reverse = False
-            z0 = Z[:, 0]
-            z1 = Z[:, 1]
-            z2 = Z[:, 2]
+            z0 = Z[0]
+            z1 = Z[1]
+            z2 = Z[2]
 
-        h = np.diff(x)[:, None]
-        n_points, n = y.shape
-        c = np.empty((4, n_points - 1, n))
+        h = t_end - t_start
+        n = y_start.size
+        c = np.empty((4, 1, n))
 
         if reverse:
             c[0] = ((-10 + 15 * S6) * z0 - (10 + 15 * S6) * z1 + 30 * z2) / (3 * h ** 3)
@@ -328,10 +330,12 @@ class Radau(OdeSolver):
             c[0] = ((10 + 15 * S6) * z0 + (10 - 15 * S6) * z1 + 10 * z2) / (3 * h ** 3)
             c[1] = -((23 + 22 * S6) * z0 + (23 - 22 * S6) * z1 + 8 * z2) / (3 * h ** 2)
             c[2] = ((13 + 7 * S6) * z0 + (13 - 7 * S6) * z1 + z2) / (3 * h)
-        c[3] = y[:-1]
+        c[3] = y_start
 
-        c = np.rollaxis(c, 2)
-        return PPoly(c, x, extrapolate=True, axis=1)
+        self._solution = PPoly(c, [t_start, t_end], extrapolate=True)
+
+    def __call__(self, ts):
+        return self._solution(ts)
 
 
 def solve_collocation_system(fun, x, y, h, J, Z0, scale, tol, LU_real,

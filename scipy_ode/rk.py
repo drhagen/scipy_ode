@@ -4,7 +4,7 @@ import numpy as np
 from scipy.interpolate import PPoly
 
 from .solver import OdeSolver, SolverStatus
-from .common import select_initial_step, norm, PointSpline, validate_rtol, validate_atol
+from .common import select_initial_step, norm, PointSpline, EmptySpline, validate_rtol, validate_atol
 
 # Multiply steps computed from asymptotic behaviour of errors by this.
 SAFETY = 0.9
@@ -72,19 +72,17 @@ class RungeKutta(OdeSolver):
     .. [1] E. Hairer, S. P. Norsett G. Wanner, "Solving Ordinary Differential
            Equations I: Nonstiff Problems", Sec. II.4.
     """
-    class OdeState(OdeSolver.OdeState):
-        def __init__(self, t, y, f, ym=None):
-            super(RungeKutta.OdeState, self).__init__(t, y)
-            self.f = f
-            self.ym = ym
-
     def __init__(self, fun, y0, t0, t_crit, C, A, B, E, M, order, step_size=None, max_step=np.inf, rtol=1e-3,
                  atol=1e-6):
-        fun, y0, t0, t_crit = self.check_arguments(fun, y0, t0, t_crit)
-        f0 = fun(t0, y0)
+        fun, y0, t0, t_crit = self.initialize(fun, y0, t0, t_crit)
 
-        state = self.OdeState(t0, y0, f0)
-        super(RungeKutta, self).__init__(fun, state, t_crit)
+        self.t_previous = None
+        self.y_previous = None
+        self.f_previous = None
+        self.ym = None
+        self.t = t0
+        self.y = y0
+        self.f = fun(t0, y0)
 
         self.C = C
         self.A = A
@@ -102,18 +100,18 @@ class RungeKutta(OdeSolver):
             step_size = select_initial_step(self.fun, self.t, t_crit, self.y, self.f, order, rtol, atol)
         self.step_size = min(step_size, max_step)
 
-    @property
-    def f(self):
-        return self.state.f
-
     def step(self):
         self.assert_step_is_possible()
 
         if self.n == 0:
             # Handle degenerate case of size-0 state
-            self.state = self.OdeState(self.state.t + self.max_step, np.zeros(self.state.y.shape),
-                                       np.zeros(self.state.y.shape), np.zeros(self.state.y.shape))
-            if self.state.t >= self.t_crit:
+            self.t_previous = self.t
+            self.y_previous = self.y
+            self.f_previous = self.f
+
+            self.t = min(self.t + self.max_step, self.t_crit)
+
+            if self.t >= self.t_crit:
                 self.status = SolverStatus.finished
             return
 
@@ -158,7 +156,13 @@ class RungeKutta(OdeSolver):
         else:
             ym = None
 
-        self.state = self.OdeState(t_new, y_new, fun(t_new, y_new), ym)
+        self.t_previous = t
+        self.y_previous = y
+        self.f_previous = f
+        self.ym = ym
+        self.t = t_new
+        self.y = y_new
+        self.f = fun(t_new, y_new)
 
         self.step_size = h_abs
 
@@ -169,59 +173,50 @@ class RungeKutta(OdeSolver):
         else:
             self.status = SolverStatus.running
 
-    def interpolator(self, states):
-        if len(states) == 1:
-            state = states[0]
-            return PointSpline(state.t, state.y)
+    def interpolator(self):
+        if self.n == 0:
+            return EmptySpline(self.t_previous, self.t)
 
-        if states[0].y.size == 0:
-            # Handle degenerate case of size-0 state
-            def always_return_empty(ts):
-                return np.zeros(np.shape(ts) + (0,))
-            return always_return_empty
+        if self.t_previous == self.t:
+            return PointSpline(self.t, self.y)
 
-        t = np.asarray([state.t for state in states])
-        y = np.asarray([state.y for state in states])
-        f = np.asarray([state.f for state in states])
-        if self.M is not None:
-            ym = np.asarray([state.ym for state in states[1:]])  # No ym on first point
+        return RungeKuttaInterpolator(self.t_previous, self.t, self.y_previous, self.y, self.f_previous, self.f,
+                                      self.ym)
+
+
+class RungeKuttaInterpolator:
+    def __init__(self, t_start, t_end, y_start, y_end, f_start, f_end, y_middle=None):
+        self.t_start = t_start
+        self.t_end = t_end
+
+        if t_end < t_start:
+            t_start, t_end = t_end, t_start
+            y_start, y_end = y_end, y_start
+            f_start, f_end = f_end, f_start
+
+        h = t_end - t_start
+        n = y_start.size
+        if y_middle is None:
+            c = np.empty((4, 1, n), dtype=y_start.dtype)
+            slope = (y_end - y_start) / h
+            t = (f_start + f_end - 2 * slope) / h
+            c[0] = t / h
+            c[1] = (slope - f_start) / h - t
+            c[2] = f_start
+            c[3] = y_start
         else:
-            ym = None
-
-        if t[-1] < t[0]:
-            t = t[::-1]
-            y = y[::-1]
-            if ym is not None:
-                ym = ym[::-1]
-            f = f[::-1]
-
-        h = np.diff(t)
-
-        y0 = y[:-1]
-        y1 = y[1:]
-        f0 = f[:-1]
-        f1 = f[1:]
-
-        n_points, n = y.shape
-        h = h[:, None]
-        if ym is None:
-            c = np.empty((4, n_points - 1, n))
-            slope = (y1 - y0) / h
-            tt = (f0 + f1 - 2 * slope) / h
-            c[0] = tt / h
-            c[1] = (slope - f0) / h - tt
-            c[2] = f0
-            c[3] = y0
-        else:
-            c = np.empty((5, n_points - 1, n))
-            c[0] = (-8 * y0 - 8 * y1 + 16 * ym) / h ** 4 + (- 2 * f0 + 2 * f1) / h ** 3
-            c[1] = (18 * y0 + 14 * y1 - 32 * ym) / h ** 3 + (5 * f0 - 3 * f1) / h ** 2
-            c[2] = (-11 * y0 - 5 * y1 + 16 * ym) / h ** 2 + (-4 * f0 + f1) / h
-            c[3] = f0
-            c[4] = y0
+            c = np.empty((5, 1, n), dtype=y_start.dtype)
+            c[0] = (-8 * y_start - 8 * y_end + 16 * y_middle) / h ** 4 + (- 2 * f_start + 2 * f_end) / h ** 3
+            c[1] = (18 * y_start + 14 * y_end - 32 * y_middle) / h ** 3 + (5 * f_start - 3 * f_end) / h ** 2
+            c[2] = (-11 * y_start - 5 * y_end + 16 * y_middle) / h ** 2 + (-4 * f_start + f_end) / h
+            c[3] = f_start
+            c[4] = y_start
 
         c = np.rollaxis(c, 2)
-        return PPoly(c, t, extrapolate=False, axis=1)
+        self._solution = PPoly(c, [t_start, t_end], extrapolate=True, axis=1)
+
+    def __call__(self, ts):
+        return self._solution(ts)
 
 
 def rk_step(fun, t, y, f, h, A, B, C, E, K):
