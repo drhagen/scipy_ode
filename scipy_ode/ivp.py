@@ -125,7 +125,7 @@ def solve_ivp(fun, y0, t0, tF, method=RungeKutta45, events=None, **options):
     .. [1] J. R. Dormand, P. J. Prince, "A family of embedded Runge-Kutta
            formulae", Journal of Computational and Applied Mathematics, Vol. 6,
            No. 1, pp. 19-26, 1980.
-    .. [2] L. W. Shampine, "Some Practical Runge-Kutta Formulas", Mathematics
+
            of Computation,, Vol. 46, No. 173, pp. 135-150, 1986.
     .. [3] P. Bogacki, L.F. Shampine, "A 3(2) Pair of Runge-Kutta Formulas",
            Appl. Math. Lett. Vol. 2, No. 4. pp. 321-325, 1989.
@@ -232,6 +232,59 @@ class OdeSolution(object):
                 self.check_time(ti)
                 result[i] = self._interpolations[inds[i]](ti)
             return result
+
+class OdeSolutionLazy(object):
+    def __init__(self, fun, t0, y0, method=RungeKutta45, **solver_options):
+        self.t0 = float(t0)
+        self.y0 = np.asarray(y0, dtype=float)
+        self.solver_increasing = method(self.t0,
+                                            self.y0,
+                                            rhs,
+                                            tF=np.inf,
+                                            **solver_options)
+        self.solver_decreasing = solver_type(self.t0,
+                                            self.y0,
+                                            rhs,
+                                            tF=-np.inf,
+                                            **solver_options)
+        self.ts_increasing = [self.t0]
+        self.splines_increasing = []
+        self.ts_decreasing = [self.t0]
+        self.splines_decreasing = []
+
+    def extend(self, t):
+        t = float(t)
+        if t>=self.t0:
+            while self.solver_increasing.t < t:
+                state_start = self.solver_increasing.state
+                self.solver_increasing.step()
+                self.splines_increasing.append(
+                    self.solver_increasing([state_start,
+                                            self.solver_increasing.state]))
+                self.ts_increasing.append(self.solver_increasing.t)
+        elif t<self.t0:
+            while self.solver_decreasing.t > t:
+                state_start = self.solver_decreasing.state
+                self.solver_decreasing.step()
+                self.splines_decreasing.append(
+                    self.solver_decreasing([state_start,
+                                            self.solver_decreasing.state]))
+                self.ts_decreasing.append(self.solver_decreasing.t)
+        else:
+            raise ValueError("Attempting to evaluate solver out to %s" % t)
+
+    def __call__(self, t, derivative=0):
+        self.extend(t)
+        if t>=self.t0:
+            i = np.searchsorted(self.ts_increasing,t)-1
+            return self.splines_increasing[i].derivative(t, derivative)
+        elif t<self.t0:
+            i = np.searchsorted(self.ts_decreasing[::-1],t)-1
+            #print(t,self.ts_decreasing[::-1],i)
+            return self.splines_decreasing[i].derivative(t, derivative)
+        else:
+            raise AssertionError("Extend error checking failed to validate call input")
+
 
 
 def prepare_events(events):
