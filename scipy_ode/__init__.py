@@ -60,9 +60,11 @@ from __future__ import division, print_function, absolute_import
 #from ._ode import *
 #from ._bvp import solve_bvp
 from .ivp import solve_ivp
-from .solver import SolverStatus
-from .rk import RungeKutta23, RungeKutta45
+from .rk import RK23, RK45
 from .radau import Radau
+from .bdf import BDF
+from .common import OdeSolution
+from .base import DenseOutput, OdeSolver
 
 __all__ = [s for s in dir() if not s.startswith('_')]
 from numpy.testing import Tester
