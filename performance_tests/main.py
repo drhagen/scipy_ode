@@ -42,7 +42,8 @@ class scipy_ode_class:
 
     def __call__(self, model, rtol):
         solver = ode(model.f)
-        solver.set_integrator(self.solver, method=self.method, rtol=rtol, max_step=10000)
+        solver.set_integrator(self.solver, method=self.method, rtol=rtol,
+                              nsteps=10000)
         solver.set_initial_value(model.y0, 0.0)
         solver.set_f_params(model.k)
 
