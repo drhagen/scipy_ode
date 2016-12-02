@@ -5,6 +5,13 @@ from pandas import DataFrame
 from scipy.integrate import odeint, ode
 import ggplot as gg
 from scipy_ode import solve_ivp
+HAS_ODES = False
+try:
+    from scikits.odes.odeint import odeint as odes_odeint
+    from scikits.odes import ode as odes_ode
+    HAS_ODES = True
+except:
+    pass
 
 import egfngf_model
 
@@ -35,7 +42,7 @@ class scipy_ode_class:
 
     def __call__(self, model, rtol):
         solver = ode(model.f)
-        solver.set_integrator(self.solver, rtol=rtol)
+        solver.set_integrator(self.solver, method=self.method, rtol=rtol, max_step=10000)
         solver.set_initial_value(model.y0, 0.0)
         solver.set_f_params(model.k)
 
@@ -45,6 +52,22 @@ class scipy_ode_class:
                 result[i, :] = model.y0
                 continue
             result[i, :] = solver.integrate(t)
+
+        return result
+
+class scipy_odes_class(scipy_ode_class):
+
+    def __call__(self, model, rtol):
+        solver = odes_ode(self.solver, model.f_odes, old_api=False,
+                          lmm_type=self.method, rtol=rtol,
+                          user_data = model.k)
+        solution = solver.solve(model.ts, model.y0)
+        for i, t in enumerate(model.ts):
+            try:
+                result[i, :] = solution.values.y[i]
+            except:
+                # no valid solution anymore
+                result[i, :] = 0
 
         return result
 
@@ -72,6 +95,10 @@ methods = [
     scipy_solver_class("Radau"),
     scipy_solver_class("BDF"),
 ]
+if HAS_ODES:
+    methods += [scipy_odes_class("cvode BDF"),
+                scipy_odes_class("cvode ADAMS"),
+                ]
 
 rtols = 10 ** np.arange(-9.0, 0.0)
 
