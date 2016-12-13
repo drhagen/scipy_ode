@@ -41,11 +41,12 @@ class scipy_ode_class:
             self.method = None
 
     def __call__(self, model, rtol):
-        solver = ode(model.f)
+        def collected_ode(t, y):
+            return model.f(t, y, model.k)
+        solver = ode(collected_ode)
         solver.set_integrator(self.solver, method=self.method, rtol=rtol,
                               nsteps=10000)
         solver.set_initial_value(model.y0, 0.0)
-        solver.set_f_params(model.k)
 
         result = np.empty((len(model.ts), len(model.y0)))
         for i, t in enumerate(model.ts):  # Drop t=0.0

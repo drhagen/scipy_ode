@@ -1,4 +1,5 @@
 from numpy import linspace
+from numba import jit
 
 name = 'egfngf'
 
@@ -91,7 +92,7 @@ y0 = [
     120000.0
 ]
 
-
+@jit
 def f(t, y, k):
     return [
         ((-1.0 * k[0] * y[0] * y[2])) + (1.0 * k[1] * y[3]),
