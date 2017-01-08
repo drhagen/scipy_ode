@@ -96,6 +96,7 @@ methods = [
     scipy_solver_class("RK23"),
     scipy_solver_class("Radau"),
     scipy_solver_class("BDF"),
+    scipy_solver_class("LSODA"),
 ]
 if HAS_ODES:
     methods += [scipy_odes_class("cvode BDF"),
