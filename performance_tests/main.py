@@ -45,7 +45,7 @@ class scipy_ode_class:
             return model.f(t, y, model.k)
         solver = ode(collected_ode)
         solver.set_integrator(self.solver, method=self.method, rtol=rtol,
-                              nsteps=10000)
+                              atol=1e-6, nsteps=10000)
         solver.set_initial_value(model.y0, 0.0)
 
         result = np.empty((len(model.ts), len(model.y0)))
@@ -62,7 +62,7 @@ class scipy_odes_class(scipy_ode_class):
     def __call__(self, model, rtol):
         solver = odes_ode(self.solver, model.f_odes, old_api=False,
                           lmm_type=self.method, rtol=rtol,
-                          user_data = model.k)
+                          atol=1e-6, user_data=model.k)
         solution = solver.solve(model.ts, model.y0)
         for i, t in enumerate(model.ts):
             try:
@@ -78,10 +78,10 @@ class scipy_solver_class:
         self.name = name
 
     def __call__(self, model, rtol):
-        def collected_ode(t, y):
+        def combined_ode(t, y):
             return model.f(t, y, model.k)
 
-        sol = solve_ivp(collected_ode, [0.0, np.max(model.ts)], model.y0, method=self.name, rtol=rtol, t_eval=model.ts)
+        sol = solve_ivp(combined_ode, [0.0, np.max(model.ts)], model.y0, method=self.name, rtol=rtol, t_eval=model.ts)
 
         return sol.y.transpose()
 
